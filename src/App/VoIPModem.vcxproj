@@ -89,4 +89,10 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
+  <!-- Phase 3's WAV-based audio sink (PjsipCallController) plays this file
+       into each call; resolved relative to the .exe at runtime, so it must
+       sit next to it. -->
+  <Target Name="CopyTestToneAsset" AfterTargets="Build">
+    <Copy SourceFiles="..\..\assets\test-tone.wav" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

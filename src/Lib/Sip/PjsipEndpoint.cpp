@@ -76,13 +76,17 @@ bool PjsipEndpoint::Start(int localPort) {
         transportConfig.port = static_cast<unsigned>(localPort);
         endpoint_->transportCreate(PJSIP_TRANSPORT_UDP, transportConfig);
 
-        // Phase 3: route call audio to this machine's sound device (see
-        // PjsipCallController's onCallMediaState) so a connected call is
-        // actually audible, as a byear-verifiable proof the RTP/codec path
-        // is clean. This opens the default capture/playback devices for
-        // the process's lifetime — expected and temporary: Phase 4
-        // replaces this sink with the DSP engine, at which point nothing
-        // needs a real sound device at all.
+        // No real sound device: Phase 3's audio sink is WAV record/playback
+        // (see PjsipCallController's onCallMediaState), which — like the
+        // DSP engine that replaces it in Phase 4 — never needs a physical
+        // playback/capture device at all. A null device still gives the
+        // conference bridge the clock source it needs to run. (An earlier
+        // version of this routed to the real local sound device instead;
+        // switched after discovering this dev machine has zero capture
+        // devices at the Windows API level, which every PJSIP sound-device
+        // path requires — see docs/ARCHITECTURE.md "RTP audio (Phase 3)".)
+        endpoint_->audDevManager().setNullDev();
+
         endpoint_->libStart();
         RestrictCodecsToG711();
         started_ = true;

@@ -235,47 +235,72 @@ transport was the thing being built and tested. Phase 3 replaces that:
   `docs/PROJECT_SPEC.md` section 4.E, a lossy voice codec (Opus, Speex,
   GSM, iLBC, ...) would corrupt modem tones outright, so none of them
   should ever be negotiable, not just de-prioritized.
-- **Audio sink** (`SipCall::onCallMediaState` in `PjsipCallController.cpp`):
-  for Phase 3's testable deliverable, each call's active audio media is
-  connected bidirectionally to this machine's default sound device
-  (`AudDevManager::getPlaybackDevMedia()`/`getCaptureDevMedia()`) — not
-  yet to anything DSP-shaped, since Phase 4 doesn't exist yet. This
-  means: (a) the sound device opens lazily on first connected call, for
-  the process's lifetime, which is expected and temporary; (b) with
-  multiple simultaneous instances, only one physical sound device exists
-  on this machine, so only one line's audio is meaningfully audible at a
-  time if more than one call is active — a real constraint of this
-  temporary sink, not a bug, and one Phase 4 removes entirely by
-  replacing the sink with a per-line DSP channel instead of shared
-  hardware.
-- **Why a sound device and not a custom `AudioMediaPort` straight to a
-  DSP seam**: discussed explicitly with the user before starting Phase
-  3. A real, byear-verifiable sound device sink was chosen over a
-  stubbed PCM-frame seam (e.g. writing to a WAV file) because it's the
-  most directly convincing proof that G.711 negotiation, RTP transport,
-  and codec fidelity are all correct — and it doesn't block Phase 4,
-  which just takes over the same `AudioMedia` connection point
-  (`onCallMediaState` is the seam; what it connects to is what changes).
+- **Audio sink — pivoted mid-phase, twice** (`SipCall::onCallMediaState`
+  in `PjsipCallController.cpp`): originally wired each call's audio
+  bidirectionally to this machine's default sound device, chosen (after
+  discussing the tradeoff with the user) over a stubbed PCM-frame seam
+  because it's the most directly, byear-verifiable proof that G.711
+  negotiation/RTP transport/codec fidelity are correct, without blocking
+  Phase 4 (which just takes over the same `onCallMediaState` connection
+  point). Live-testing that version against a real call immediately
+  surfaced `PJMEDIA_EAUD_NODEFDEV` ("unable to find default audio
+  device") on **both** playback and capture, even though this machine
+  has a working speaker (confirmed via `Get-PnpDevice -Class
+  AudioEndpoint`, status OK). Traced into pjproject's own source
+  (`pjmedia/src/pjmedia/audiodev.c`, `pjmedia/src/pjmedia-audiodev/wmme_dev.c`,
+  `pjsip/src/pjsua2/media.cpp`) to the real cause: this machine has
+  **zero** capture devices at the Win32 level
+  (`waveInGetNumDevs() == 0`, confirmed directly via a `winmm.dll`
+  P/Invoke check — not inferred), and every sound-device path pjsua2
+  exposes — both the "default device" lookup and the alternate
+  `ExtraAudioDevice` class — hardcodes `PJMEDIA_DIR_CAPTURE_PLAYBACK`
+  (duplex only; no playback-only mode exists anywhere in pjsua2's audio
+  device layer). This is a genuine PJSIP/hardware constraint on this
+  specific machine, not a VoIPModem bug, and not fixable by better error
+  handling — no amount of catching exceptions makes a duplex-only API
+  open on a machine with no capture device.
+- **Current approach**: each call's audio connects to an
+  `AudioMediaRecorder` (incoming call audio -> a WAV file,
+  `call-recording-<extension>-<unix-timestamp>.wav`, written next to the
+  `.exe`) and an `AudioMediaPlayer` (a bundled test tone ->
+  `assets/test-tone.wav`, an 8kHz mono 16-bit 1kHz sine tone generated
+  for this purpose, looped into the call automatically). Neither needs
+  any physical sound device at all, so this works regardless of what
+  audio hardware is present. `PjsipEndpoint::Start()` went back to
+  `audDevManager().setNullDev()` (same as Phase 2) since nothing needs a
+  real device anymore — the null device just gives the conference bridge
+  its clock source. `test-tone.wav` is copied next to `VoIPModem.exe` by
+  a post-build step in `VoIPModem.vcxproj` (`CopyTestToneAsset` target);
+  both the recording and the tone path are resolved relative to the
+  running `.exe`'s own directory (`GetModuleFileNameA`), not the current
+  working directory, so this works no matter where the process is
+  launched from.
+- **Verification shape, given this**: confirming Phase 3 now means
+  listening to the recorded WAV afterward (not live), and confirming
+  whoever is on the physical analog line actually hears the test tone.
+  This is a real change in how "bidirectional audio, uncorrupted" gets
+  checked for this phase, agreed with the user after the live-device
+  path turned out to be unusable on this machine specifically — it may
+  still be worth supporting on a machine that does have a capture
+  device, but that's not implemented; this is the one and only sink
+  right now.
 
-**Not yet verified** (as of this writing): this code has only been
-smoke-tested for startup (both instances register, no crash, no
-codec/media errors logged) — no call has actually gone active yet, so
-the sound-device connection in `onCallMediaState` has never actually
-run. The real test, planned next: a physical analog line, through the
-Cisco FXS gateway and Asterisk, dialing into extension 1003 (and/or
-1004), to confirm audio is actually audible and bidirectional. This
-would be the first point in the project where audio flows end-to-end
-through the real signal path described in `docs/PROJECT_SPEC.md`
-section 2's topology diagram (minus the Windows-98-client leg, which
-isn't wired up yet) — update this section with the real result once
-that test has actually happened, not before.
+**Not yet verified** (as of this writing): the WAV-based version above
+has only been smoke-tested for startup (registers cleanly, no
+device/media errors, since no device is touched at all) — no call has
+gone active against it yet. The real test, planned next: a physical
+analog line, through the Cisco FXS gateway and Asterisk, dialing into
+extension 1003, then listening to the resulting
+`call-recording-1003-*.wav` and confirming whoever's on the other end
+heard the test tone clearly. Update this section with the real result
+once that test has actually happened, not before.
 
 Separately, even once that test passes: it only proves the audio is
-clean enough for *human voice* to sound right, which is a good sign for
-codec/transport correctness but is not the same test as a real V.32bis
-handshake tone surviving the path undistorted — that's Phase 4's job to
-prove, once there's a DSP engine that can tell the difference between
-"sounds fine" and "decodes correctly".
+clean enough for *human voice* (or a simple sine tone) to survive the
+path, which is a good sign for codec/transport correctness but is not
+the same test as a real V.32bis handshake tone surviving undistorted —
+that's Phase 4's job to prove, once there's a DSP engine that can tell
+the difference between "sounds fine" and "decodes correctly".
 
 ## What exists today
 

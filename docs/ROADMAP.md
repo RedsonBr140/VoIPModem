@@ -127,26 +127,48 @@ Done:
 - Codec negotiation restricted process-wide to G.711 (PCMU/PCMA) only;
   every other codec (Opus, Speex, GSM, iLBC, ...) is disabled outright,
   not just de-prioritized, per section 4.E.
-- Each call's active audio media is connected to this machine's default
-  sound device on `onCallMediaState`, as the Phase 3 testable deliverable
-  (chosen over a stubbed DSP-facing port after discussing the tradeoff
-  with the user) — a real, byear-verifiable proof that G.711
-  negotiation/RTP transport/codec fidelity are correct, without blocking
-  Phase 4, which just takes over the same connection point.
-- Smoke-tested: both instances start, register, and open without any
-  codec/media errors logged. **The sound-device connection itself has
-  not actually run yet** — it only fires once a call's media goes
-  active, and no call has gone active against this code yet.
+- First audio sink tried: each call's active audio connected to this
+  machine's default sound device on `onCallMediaState`, chosen over a
+  stubbed DSP-facing port after discussing the tradeoff with the user —
+  a real, byear-verifiable proof that G.711/RTP/codec fidelity are
+  correct, without blocking Phase 4. **Live-tested by the user
+  immediately — failed**: `PJMEDIA_EAUD_NODEFDEV` on both playback and
+  capture. Traced through pjproject's own source to the real cause: this
+  dev machine has zero capture devices at the Win32 API level
+  (`waveInGetNumDevs() == 0`, confirmed directly via a `winmm.dll`
+  P/Invoke check), and pjsua2's entire audio-device layer — both the
+  default-device lookup and the `ExtraAudioDevice` alternative —
+  hardcodes duplex (`PJMEDIA_DIR_CAPTURE_PLAYBACK`); there is no
+  playback-only mode anywhere in it. A real PJSIP/hardware constraint on
+  this machine, not a VoIPModem bug — confirmed with the user (no mic on
+  this PC, as expected), who then chose the alternative below over
+  testing on different hardware instead.
+- **Current audio sink**: an `AudioMediaRecorder` (incoming call audio ->
+  `call-recording-<extension>-<timestamp>.wav`) and an
+  `AudioMediaPlayer` (loops a bundled `assets/test-tone.wav` — an 8kHz
+  mono 16-bit 1kHz sine tone — into the call). Neither needs any
+  physical sound device, so it's independent of this machine's hardware
+  gap. `test-tone.wav` is copied next to `VoIPModem.exe` by a
+  `VoIPModem.vcxproj` post-build step; both file paths resolve relative
+  to the running `.exe`, not the working directory.
+- Smoke-tested: both instances start, register, and open with zero
+  device/media errors (expected — nothing touches a device anymore).
+  **No call has gone active against this version yet.**
 
-Not yet verified — this is the actual Phase 3 acceptance test:
+Not yet verified — this is the actual Phase 3 acceptance test, now
+shaped differently than originally planned (checking a recording
+afterward rather than listening live, since live listening isn't
+possible on this machine):
 - A real call (planned: a physical analog line through the Cisco FXS
-  gateway and Asterisk, dialing into extension 1003 and/or 1004)
-  reaching active media and producing genuinely audible, bidirectional
-  audio with no corruption.
-- Even once that passes, it only proves human voice sounds right over
-  the path — not that an actual modem handshake tone would survive
-  undistorted. That distinction is Phase 4's to prove, once a DSP engine
-  exists that can tell "sounds fine" from "decodes correctly" apart.
+  gateway and Asterisk, dialing into extension 1003) reaching active
+  media, after which the resulting `call-recording-1003-*.wav` should be
+  clean (not silent, not corrupted), and whoever's on the analog line
+  should clearly hear the test tone.
+- Even once that passes, it only proves a sine tone (or human voice)
+  sounds right over the path — not that an actual modem handshake tone
+  would survive undistorted. That distinction is Phase 4's to prove,
+  once a DSP engine exists that can tell "sounds fine" from "decodes
+  correctly" apart.
 
 ## Phase 4 — Actual modem interoperability — **not started**
 
@@ -169,8 +191,9 @@ client — has not been started.
 ## Recommended next step
 
 Phase 2 is done. Run the real Phase 3 acceptance test: dial a physical
-analog line into extension 1003 (and/or 1004) and confirm audio is
-actually audible and clean both directions. Update this file and
+analog line into extension 1003, then check `call-recording-1003-*.wav`
+(next to `VoIPModem.exe`) is clean and confirm whoever's on the line
+heard the test tone clearly. Update this file and
 `docs/ARCHITECTURE.md` "RTP audio (Phase 3)" with the real result
 immediately after — don't leave the "not yet verified" language in
 place once it's been tested.

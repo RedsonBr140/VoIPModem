@@ -12,10 +12,13 @@ auto-answer all confirmed working, including two simultaneously
 registered extensions both reaching `CONNECT`. **Phase 3 (RTP audio) is
 implemented but not yet live-tested** — G.711-only codec negotiation and
 modem-tone-preserving media settings (no VAD/echo cancellation, native
-8kHz) are in place, and each call's audio connects to this machine's
-sound device, but no call has actually gone active against this code
-yet. There is no modem DSP implementation yet (Phase 4) — Phase 3 proves
-audio *transport* is clean, not that a real modem handshake survives it.
+8kHz) are in place; each call's audio connects to a WAV recorder/player
+rather than a live sound device (this dev machine has no microphone at
+the Windows API level, and pjsua2's device layer is duplex-only — see
+`docs/ARCHITECTURE.md` "RTP audio (Phase 3)"), but no call has actually
+gone active against this code yet. There is no modem DSP implementation
+yet (Phase 4) — Phase 3 proves audio *transport* is clean, not that a
+real modem handshake survives it.
 
 ## Build
 
@@ -68,7 +71,13 @@ Or open `VoIPModem.sln` in Visual Studio and build normally. Only
 3. Run `VoIPModem.exe [path-to-ini]`.
 4. Open the other side of each COM pair in a terminal emulator and type
    `AT`, `ATI`, `ATZ`, `ATD<number>`, etc.
-5. Stop with Ctrl+C.
+5. Once a call connects, it plays a looping test tone
+   (`assets/test-tone.wav`, copied next to the `.exe` at build time) and
+   records the incoming audio to `call-recording-<extension>-<timestamp>.wav`
+   next to the `.exe` — check that file afterward to verify audio
+   actually made it through clean (see `docs/ARCHITECTURE.md` "RTP audio
+   (Phase 3)" for why it's file-based rather than live playback).
+6. Stop with Ctrl+C.
 
 ## Test
 
