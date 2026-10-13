@@ -116,12 +116,25 @@ public:
                 continue;
             }
 
+            // Playback and capture are wired up independently: a machine
+            // with speakers but no microphone configured (confirmed to
+            // happen on the dev machine — Windows reports no default
+            // capture device at all in that case, PJMEDIA_EAUD_NODEFDEV)
+            // should still get to hear the call even though it can't send
+            // audio back. One failing must not silently take out the other.
+            pj::AudDevManager& audioDevices = pj::Endpoint::instance().audDevManager();
+
             try {
-                pj::AudDevManager& audioDevices = pj::Endpoint::instance().audDevManager();
                 audioMedia->startTransmit(audioDevices.getPlaybackDevMedia());
+            } catch (const pj::Error& err) {
+                impl_.logger_.Error("Failed to connect call audio to the playback device: " + err.info());
+            }
+
+            try {
                 audioDevices.getCaptureDevMedia().startTransmit(*audioMedia);
             } catch (const pj::Error& err) {
-                impl_.logger_.Error("Failed to connect call audio to the sound device: " + err.info());
+                impl_.logger_.Error("Failed to connect call audio to the capture device "
+                                     "(no microphone configured?): " + err.info());
             }
         }
     }
