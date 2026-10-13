@@ -285,22 +285,24 @@ transport was the thing being built and tested. Phase 3 replaces that:
   device, but that's not implemented; this is the one and only sink
   right now.
 
-**Not yet verified** (as of this writing): the WAV-based version above
-has only been smoke-tested for startup (registers cleanly, no
-device/media errors, since no device is touched at all) — no call has
-gone active against it yet. The real test, planned next: a physical
-analog line, through the Cisco FXS gateway and Asterisk, dialing into
-extension 1003, then listening to the resulting
-`call-recording-1003-*.wav` and confirming whoever's on the other end
-heard the test tone clearly. Update this section with the real result
-once that test has actually happened, not before.
+**Verified live** (2026-10-13): a physical analog line, through the
+Cisco FXS gateway and Asterisk, dialed into extension 1003 — the call
+reached active media, the resulting `call-recording-1003-*.wav` was
+clean (not silent, not corrupted), and the test tone was clearly audible
+on the analog line's end. This is the first point in the project where
+audio has actually flowed end-to-end through the real signal path
+described in `docs/PROJECT_SPEC.md` section 2's topology diagram (minus
+the Windows-98-client leg, which isn't wired up yet). **Phase 3 is
+done.**
 
-Separately, even once that test passes: it only proves the audio is
-clean enough for *human voice* (or a simple sine tone) to survive the
-path, which is a good sign for codec/transport correctness but is not
-the same test as a real V.32bis handshake tone surviving undistorted —
-that's Phase 4's job to prove, once there's a DSP engine that can tell
-the difference between "sounds fine" and "decodes correctly".
+What this does *not* prove, carried forward as Phase 4's job: this only
+shows a sine tone (or human voice) survives the path cleanly — not that
+a real V.32bis handshake tone would survive undistorted at the bit
+level. That's for a DSP engine to prove, once one exists that can tell
+"sounds fine" from "decodes correctly" apart. The WAV
+recorder/player seam in `SipCall::onCallMediaState` is exactly where
+that DSP engine plugs in — swap what's connected to `audioMedia`,
+nothing about SIP signaling or the modem state machine needs to change.
 
 ## What exists today
 

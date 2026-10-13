@@ -112,7 +112,7 @@ regressions): graceful Ctrl+C shutdown with a
 `PjsipCallController`/`PjsipEndpoint` actually torn down (only
 forced-process-kill has been exercised with SIP active).
 
-## Phase 3 — RTP audio — **implemented, awaiting live audio test**
+## Phase 3 — RTP audio — **complete, verified live**
 
 Spec acceptance criterion: *bidirectional modem-like audio can pass
 through the VoIP path without the application corrupting it.*
@@ -153,22 +153,20 @@ Done:
   to the running `.exe`, not the working directory.
 - Smoke-tested: both instances start, register, and open with zero
   device/media errors (expected — nothing touches a device anymore).
-  **No call has gone active against this version yet.**
 
-Not yet verified — this is the actual Phase 3 acceptance test, now
-shaped differently than originally planned (checking a recording
-afterward rather than listening live, since live listening isn't
-possible on this machine):
-- A real call (planned: a physical analog line through the Cisco FXS
-  gateway and Asterisk, dialing into extension 1003) reaching active
-  media, after which the resulting `call-recording-1003-*.wav` should be
-  clean (not silent, not corrupted), and whoever's on the analog line
-  should clearly hear the test tone.
-- Even once that passes, it only proves a sine tone (or human voice)
-  sounds right over the path — not that an actual modem handshake tone
-  would survive undistorted. That distinction is Phase 4's to prove,
-  once a DSP engine exists that can tell "sounds fine" from "decodes
-  correctly" apart.
+**Verified live** (2026-10-13): a physical analog line, through the
+Cisco FXS gateway and Asterisk, dialed into extension 1003 — the call
+reached active media, `call-recording-1003-*.wav` came out clean (not
+silent, not corrupted), and the test tone was clearly audible on the
+analog line's end. Phase 3's acceptance criterion ("bidirectional
+modem-like audio can pass through the VoIP path without the application
+corrupting it") is met for a sine tone / human-voice-shaped signal.
+
+Carried into Phase 4, not yet proven: this only shows a sine tone (or
+human voice) survives the path — not that an actual modem handshake
+tone would survive undistorted at the bit level. That distinction is
+Phase 4's to prove, once a DSP engine exists that can tell "sounds
+fine" from "decodes correctly" apart.
 
 ## Phase 4 — Actual modem interoperability — **not started**
 
@@ -190,10 +188,12 @@ client — has not been started.
 
 ## Recommended next step
 
-Phase 2 is done. Run the real Phase 3 acceptance test: dial a physical
-analog line into extension 1003, then check `call-recording-1003-*.wav`
-(next to `VoIPModem.exe`) is clean and confirm whoever's on the line
-heard the test tone clearly. Update this file and
-`docs/ARCHITECTURE.md` "RTP audio (Phase 3)" with the real result
-immediately after — don't leave the "not yet verified" language in
-place once it's been tested.
+Phases 1-3 are done and verified live. Start Phase 4 (actual modem
+interoperability): pick and integrate a DSP/modulation engine (prefer an
+established library over writing a protocol stack from scratch, per
+CLAUDE.md), starting with the modest target `PROJECT_SPEC.md` section
+4.E specifies — V.32bis at 9600 bit/s — before attempting anything
+faster. The WAV-based `AudioMediaRecorder`/`AudioMediaPlayer` sink in
+`PjsipCallController` is exactly the seam this plugs into: Phase 4
+replaces that sink with the DSP engine's PCM frames in and out, without
+needing to touch SIP signaling or the modem state machine at all.

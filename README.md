@@ -5,20 +5,21 @@ modem and transports modem calls over SIP/VoIP. See
 `docs/PROJECT_SPEC.md` for the full specification, `docs/ARCHITECTURE.md`
 for what is actually implemented, and `docs/ROADMAP.md` for phase status.
 
-**Current status: Phase 1 (serial/Hayes skeleton) and Phase 2 (SIP call
-control) complete and verified live** against a real Asterisk server —
-registration, outgoing and incoming calls, RING, `ATA`, and S0
-auto-answer all confirmed working, including two simultaneously
-registered extensions both reaching `CONNECT`. **Phase 3 (RTP audio) is
-implemented but not yet live-tested** — G.711-only codec negotiation and
-modem-tone-preserving media settings (no VAD/echo cancellation, native
-8kHz) are in place; each call's audio connects to a WAV recorder/player
-rather than a live sound device (this dev machine has no microphone at
-the Windows API level, and pjsua2's device layer is duplex-only — see
-`docs/ARCHITECTURE.md` "RTP audio (Phase 3)"), but no call has actually
-gone active against this code yet. There is no modem DSP implementation
-yet (Phase 4) — Phase 3 proves audio *transport* is clean, not that a
-real modem handshake survives it.
+**Current status: Phases 1-3 complete and verified live** against a
+real Asterisk server — serial/Hayes command mode, SIP registration,
+outgoing and incoming calls, RING, `ATA`, S0 auto-answer, and two
+simultaneously registered extensions reaching `CONNECT`, are all
+confirmed working. Phase 3 (RTP audio) is verified via a physical
+analog line dialed into a registered extension: G.711-only codec
+negotiation and modem-tone-preserving media settings (no VAD/echo
+cancellation, native 8kHz) are in place, and call audio — recorded to a
+WAV file and a looping test tone played back, rather than a live sound
+device, since this dev machine has no microphone at the Windows API
+level and pjsua2's device layer is duplex-only (see
+`docs/ARCHITECTURE.md` "RTP audio (Phase 3)") — came through clean and
+audible. **There is no modem DSP implementation yet (Phase 4)** — Phase
+3 only proves audio *transport* is clean, not that a real modem
+handshake survives it; that's next.
 
 ## Build
 
