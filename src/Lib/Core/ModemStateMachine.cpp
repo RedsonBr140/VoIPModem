@@ -19,17 +19,6 @@ ModemStateMachine::ModemStateMachine(ICallController& callController, TaggedLogg
                                       std::string identification)
     : callController_(callController), logger_(logger), identification_(std::move(identification)) {}
 
-ResultCode ModemStateMachine::ToResultCode(CallOutcome outcome) {
-    switch (outcome) {
-        case CallOutcome::NoCarrier: return ResultCode::NoCarrier;
-        case CallOutcome::NoAnswer: return ResultCode::NoAnswer;
-        case CallOutcome::Busy: return ResultCode::Busy;
-        case CallOutcome::NoDialtone: return ResultCode::NoDialtone;
-        case CallOutcome::Ringing: return ResultCode::NoCarrier; // not reachable in Phase 1
-    }
-    return ResultCode::Error;
-}
-
 ExecutionOutcome ModemStateMachine::Execute(const AtParseResult& parsed) {
     ExecutionOutcome outcome;
     outcome.suppressFinalResult = profile_.quietMode;
@@ -91,24 +80,28 @@ ExecutionOutcome ModemStateMachine::Execute(const AtParseResult& parsed) {
                 logger_.Info("ATD" + std::string(cmd.dialMode == AtDialMode::Tone ? "T" :
                                                    cmd.dialMode == AtDialMode::Pulse ? "P" : "") +
                              " dialing '" + cmd.stringParam + "'");
-                const CallOutcome result = callController_.Dial(cmd.stringParam);
-                state_ = ModemState::CommandMode; // no backend yet connects/stays online
-                outcome.finalResult = ToResultCode(result);
-                return outcome; // parser guarantees Dial is the last command in the chain
+                callController_.Dial(cmd.stringParam);
+                // No immediate response: a real modem doesn't print CONNECT/NO
+                // CARRIER/etc. until the call actually resolves, which happens
+                // later via HandleCallEvent(). Parser guarantees Dial is the
+                // last command in its chain.
+                outcome.hasResult = false;
+                return outcome;
             }
 
             case AtCommandType::Answer: {
                 state_ = ModemState::Answering;
                 logger_.Info("ATA answering incoming call");
-                const CallOutcome result = callController_.Answer();
-                state_ = ModemState::CommandMode;
-                outcome.finalResult = ToResultCode(result);
+                callController_.Answer();
+                hasIncomingCall_ = false; // acted on it; stop any RING cadence/auto-answer countdown
+                outcome.hasResult = false; // result (CONNECT/NO CARRIER) arrives via HandleCallEvent()
                 return outcome;
             }
 
             case AtCommandType::HangUp:
                 logger_.Info("ATH hanging up");
                 callController_.HangUp();
+                hasIncomingCall_ = false;
                 state_ = ModemState::CommandMode;
                 break;
 
@@ -177,6 +170,40 @@ ExecutionOutcome ModemStateMachine::ExecuteExtendedCommand(const AtCommand& cmd)
     }
 
     outcome.finalResult = ResultCode::Error;
+    return outcome;
+}
+
+ExecutionOutcome ModemStateMachine::HandleCallEvent(const CallEvent& event) {
+    ExecutionOutcome outcome;
+    outcome.suppressFinalResult = profile_.quietMode;
+
+    switch (event.type) {
+        case CallEventType::None:
+            outcome.hasResult = false;
+            return outcome;
+
+        case CallEventType::IncomingCall:
+            // Not a response by itself — ModemInstance owns the RING cadence
+            // and S0 auto-answer countdown based on HasIncomingCall().
+            hasIncomingCall_ = true;
+            state_ = ModemState::Answering;
+            outcome.hasResult = false;
+            return outcome;
+
+        case CallEventType::Connected:
+            hasIncomingCall_ = false;
+            state_ = ModemState::OnlineData;
+            outcome.finalResult = ResultCode::Connect;
+            return outcome;
+
+        case CallEventType::Ended:
+            hasIncomingCall_ = false;
+            state_ = ModemState::CommandMode;
+            outcome.finalResult = event.result;
+            return outcome;
+    }
+
+    outcome.hasResult = false;
     return outcome;
 }
 

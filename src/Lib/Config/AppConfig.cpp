@@ -49,6 +49,7 @@ AppConfig LoadAppConfig(const IniConfig& ini) {
     AppConfig config;
     config.logLevel = ParseLogLevel(ini.GetString("Logging", "Level", "Info"), config.logLevel);
     config.logFilePath = ini.GetString("Logging", "File", config.logFilePath);
+    config.sipLocalPort = ini.GetInt("SIP", "LocalPort", config.sipLocalPort);
 
     for (const std::string& sectionName : ini.SectionNames()) {
         std::string instanceName;
@@ -62,6 +63,10 @@ AppConfig LoadAppConfig(const IniConfig& ini) {
         modem.baudRate = ini.GetInt(sectionName, "BaudRate", modem.baudRate);
         modem.modemIdentification = ini.GetString(sectionName, "Identification", modem.modemIdentification);
         modem.autoAnswerRingCount = ini.GetInt(sectionName, "AutoAnswerRingCount", modem.autoAnswerRingCount);
+        modem.sipServer = ini.GetString(sectionName, "SipServer", modem.sipServer);
+        modem.sipExtension = ini.GetString(sectionName, "SipExtension", modem.sipExtension);
+        modem.sipPassword = ini.GetString(sectionName, "SipPassword", modem.sipPassword);
+        modem.sipRealm = ini.GetString(sectionName, "SipRealm", modem.sipRealm);
         config.modems.push_back(std::move(modem));
     }
 

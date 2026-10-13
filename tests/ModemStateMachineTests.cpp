@@ -6,7 +6,8 @@
 #include "../src/Lib/Logging/TaggedLogger.h"
 
 using voipmodem::AtCommandParser;
-using voipmodem::CallOutcome;
+using voipmodem::CallEvent;
+using voipmodem::CallEventType;
 using voipmodem::Logger;
 using voipmodem::ModemStateMachine;
 using voipmodem::ResultCode;
@@ -80,16 +81,64 @@ TEST(SetThenQueryRegister_RoundTrips) {
     EXPECT_EQ(outcome.infoLines[0], std::string("003"));
 }
 
-TEST(Dial_ReturnsControllerOutcomeAsResultCode) {
+TEST(Dial_HasNoImmediateResult) {
+    // Real call setup resolves later (see ICallController); Execute()
+    // itself must not print CONNECT/NO CARRIER/etc. immediately.
     FakeCallController controller;
-    controller.dialOutcome = CallOutcome::Busy;
     Logger logger;
     TaggedLogger taggedLogger(logger, "Test");
     ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     const auto outcome = core.Execute(AtCommandParser::Parse("ATD5551234"));
+    EXPECT_TRUE(!outcome.hasResult);
     EXPECT_EQ(controller.lastDialedNumber, std::string("5551234"));
+}
+
+TEST(DialThenPollEvent_ReportsControllerOutcomeAsResultCode) {
+    FakeCallController controller;
+    controller.dialEvent = CallEvent{CallEventType::Ended, ResultCode::Busy};
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    core.Execute(AtCommandParser::Parse("ATD5551234"));
+    const auto outcome = core.HandleCallEvent(controller.PollEvent());
     EXPECT_TRUE(outcome.finalResult == ResultCode::Busy);
+}
+
+TEST(HandleCallEvent_Connected_ReportsConnect) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.HandleCallEvent(CallEvent{CallEventType::Connected});
+    EXPECT_TRUE(outcome.finalResult == ResultCode::Connect);
+}
+
+TEST(HandleCallEvent_IncomingCall_SetsHasIncomingCallAndNoResult) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    EXPECT_TRUE(!core.HasIncomingCall());
+    const auto outcome = core.HandleCallEvent(CallEvent{CallEventType::IncomingCall});
+    EXPECT_TRUE(!outcome.hasResult);
+    EXPECT_TRUE(core.HasIncomingCall());
+}
+
+TEST(Answer_ClearsHasIncomingCall) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    core.HandleCallEvent(CallEvent{CallEventType::IncomingCall});
+    EXPECT_TRUE(core.HasIncomingCall());
+
+    core.Execute(AtCommandParser::Parse("ATA"));
+    EXPECT_TRUE(!core.HasIncomingCall());
 }
 
 TEST(DialWithToneModifier_DialsTheNumberNotTheLetterT) {
@@ -114,14 +163,16 @@ TEST(DialWithPulseModifier_DialsTheNumberNotTheLetterP) {
     EXPECT_EQ(controller.lastDialedNumber, std::string("5551234"));
 }
 
-TEST(Answer_ReturnsControllerOutcomeAsResultCode) {
+TEST(AnswerThenPollEvent_ReportsControllerOutcomeAsResultCode) {
     FakeCallController controller;
-    controller.answerOutcome = CallOutcome::NoAnswer;
+    controller.answerEvent = CallEvent{CallEventType::Ended, ResultCode::NoAnswer};
     Logger logger;
     TaggedLogger taggedLogger(logger, "Test");
     ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
-    const auto outcome = core.Execute(AtCommandParser::Parse("ATA"));
+    const auto execOutcome = core.Execute(AtCommandParser::Parse("ATA"));
+    EXPECT_TRUE(!execOutcome.hasResult);
+    const auto outcome = core.HandleCallEvent(controller.PollEvent());
     EXPECT_TRUE(outcome.finalResult == ResultCode::NoAnswer);
 }
 

@@ -68,6 +68,34 @@ TEST(NonModemSections_AreIgnoredForInstanceDiscovery) {
     EXPECT_EQ(config.modems[0].name, std::string("Line1"));
 }
 
+TEST(SipLocalPort_DefaultsToZero_MeaningDisabled) {
+    IniConfig ini;
+    ini.LoadFromString("[Modem]\nComPort=COM3\n");
+
+    const AppConfig config = LoadAppConfig(ini);
+    EXPECT_EQ(config.sipLocalPort, 0);
+}
+
+TEST(SipSettings_ParsePerInstance) {
+    IniConfig ini;
+    ini.LoadFromString(
+        "[SIP]\n"
+        "LocalPort=5060\n"
+        "\n"
+        "[Modem.Line1]\n"
+        "ComPort=COM3\n"
+        "SipServer=sip.example.com:5060\n"
+        "SipExtension=1001\n"
+        "SipPassword=testpassword\n");
+
+    const AppConfig config = LoadAppConfig(ini);
+    EXPECT_EQ(config.sipLocalPort, 5060);
+    EXPECT_EQ(config.modems[0].sipServer, std::string("sip.example.com:5060"));
+    EXPECT_EQ(config.modems[0].sipExtension, std::string("1001"));
+    EXPECT_EQ(config.modems[0].sipPassword, std::string("testpassword"));
+    EXPECT_EQ(config.modems[0].sipRealm, std::string("*")); // default, not overridden here
+}
+
 TEST(IniConfig_SectionNames_PreservesOriginalCaseAndOrder) {
     IniConfig ini;
     ini.LoadFromString("[Modem.Line1]\nComPort=COM3\n\n[Modem.Line2]\nComPort=COM5\n");

@@ -1,32 +1,45 @@
 #pragma once
 
+#include <deque>
 #include <string>
 
 #include "../src/Lib/Core/ICallController.h"
 
 namespace voipmodem::test {
 
-// Deterministic, test-only ICallController: returns whatever outcome the
-// test configured instead of NullCallController's fixed stub behavior, so
-// state-machine tests can exercise every CallOutcome -> ResultCode mapping.
+// Deterministic, test-only ICallController. Dial()/Answer() queue
+// whatever CallEvent the test configured instead of PjsipCallController's
+// real (and genuinely asynchronous) SIP signaling, so state-machine
+// tests can exercise ModemStateMachine::HandleCallEvent() for every
+// CallEventType without needing a live SIP server.
 class FakeCallController : public voipmodem::ICallController {
 public:
-    voipmodem::CallOutcome dialOutcome = voipmodem::CallOutcome::NoCarrier;
-    voipmodem::CallOutcome answerOutcome = voipmodem::CallOutcome::NoAnswer;
+    voipmodem::CallEvent dialEvent{voipmodem::CallEventType::Ended, voipmodem::ResultCode::NoCarrier};
+    voipmodem::CallEvent answerEvent{voipmodem::CallEventType::Ended, voipmodem::ResultCode::NoAnswer};
     std::string lastDialedNumber;
     int hangUpCount = 0;
+    std::deque<voipmodem::CallEvent> queuedEvents;
 
-    voipmodem::CallOutcome Dial(const std::string& number) override {
+    void Dial(const std::string& number) override {
         lastDialedNumber = number;
-        return dialOutcome;
+        queuedEvents.push_back(dialEvent);
     }
 
-    voipmodem::CallOutcome Answer() override {
-        return answerOutcome;
+    void Answer() override {
+        queuedEvents.push_back(answerEvent);
     }
 
     void HangUp() override {
         ++hangUpCount;
+    }
+
+    voipmodem::CallEvent PollEvent() override {
+        if (queuedEvents.empty()) {
+            return voipmodem::CallEvent{};
+        }
+        const voipmodem::CallEvent event = queuedEvents.front();
+        queuedEvents.pop_front();
+        return event;
     }
 };
 

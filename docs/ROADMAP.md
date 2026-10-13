@@ -63,12 +63,48 @@ Done:
   this backwards (driver on the same port VoIPModem has open) doesn't
   work — that port is already held open by VoIPModem.
 
-## Phase 2 — SIP call control — **not started**
+## Phase 2 — SIP call control — **mostly verified; incoming calls untested**
 
-No PJSIP dependency, no `ICallController` implementation beyond the
-`NullCallController` stub, no registration, no RING generation. `ATD`
-and `ATA` currently always return `NO CARRIER`/`NO ANSWER` by design, not
-by partial implementation.
+Spec acceptance criterion: *incoming and outgoing SIP calls work
+reliably, with correct serial responses.*
+
+Done:
+- PJSIP (pjproject 2.17) vendored as a git submodule and built from
+  source (no vcpkg/Conan package exists for it) — see
+  `docs/ARCHITECTURE.md` "SIP integration (Phase 2)" for the full build
+  story, including the `libpjproject` vs. `pjsua2_lib` target gotcha.
+- `PjsipCallController` (src/Lib/Sip), a second `ICallController`
+  implementation alongside `NullCallController`. `ModemStateMachine`
+  did **not** need to change its shape to add this — it only needed to
+  stop pretending `ATD`/`ATA` resolve synchronously, which was always a
+  Phase-1-stub-only simplification (see the async model in
+  `docs/ARCHITECTURE.md`).
+- Per-instance SIP registration (`SipServer`/`SipExtension`/`SipPassword`/`SipRealm`
+  config keys), one process-wide `PjsipEndpoint`/UDP transport
+  (`[SIP] LocalPort`) shared by all instances' accounts.
+- RING cadence + S0 auto-answer, `ATD`/`ATA`/`ATH` wired to real SIP
+  INVITE/answer/BYE, SIP status code -> Hayes result code mapping.
+- 55 unit tests (17 new), all passing.
+- **Verified against a real Asterisk test server** (10.174.7.172:5060,
+  extension 1003): SIP registration succeeded (200 OK), and `ATD` to an
+  unroutable number went through the real async SIP signaling round-trip
+  and correctly produced `NO CARRIER` on the actual serial port — not a
+  mock, not just a unit test.
+
+Not yet verified:
+- **An actual incoming call** — RING generation, `ATA` accepting a real
+  call, and S0 auto-answer have unit-test coverage but no live test; this
+  needs a second endpoint to call extension 1003 from, which wasn't
+  available this session. Per `PROJECT_SPEC.md`, "an implementation that
+  only places outgoing calls is insufficient" — **do this next**, before
+  treating Phase 2 as done.
+- A real successful outgoing call reaching `CONNECT` (only an
+  unroutable-number failure path was exercised live).
+- Graceful Ctrl+C shutdown with a `PjsipCallController`/`PjsipEndpoint`
+  actually torn down (only forced-process-kill has been exercised with
+  SIP active).
+- Multiple SIP-backed instances registering concurrently (only one
+  instance had real SIP credentials to test with this session).
 
 ## Phase 3 — RTP audio — **not started**
 
@@ -92,7 +128,7 @@ client — has not been started.
 
 ## Recommended next step
 
-Phase 1 is verified. Begin Phase 2 (SIP call control via PJSIP) by
-adding a new `ICallController` implementation alongside
-`NullCallController` — `ModemStateMachine` should not need to change,
-since that interface is the seam it was designed around.
+Place or receive a real call against extension 1003 to verify the
+incoming-call path (RING, `ATA`, S0 auto-answer) and a successful
+`CONNECT`, closing Phase 2's one remaining gap, before starting Phase 3
+(RTP audio).

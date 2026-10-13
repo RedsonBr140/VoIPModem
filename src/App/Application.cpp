@@ -29,10 +29,20 @@ Application::Application(std::string configPath)
 
 int Application::Run() {
     logger_.Init(config_.logLevel, config_.logFilePath);
-    logger_.Info("VoIPModem starting (Phase 1: Hayes command skeleton, no SIP/DSP backend yet)");
+    logger_.Info("VoIPModem starting (Phase 2: Hayes command skeleton + SIP call control)");
+
+    if (config_.sipLocalPort > 0) {
+        auto endpoint = std::make_unique<PjsipEndpoint>(logger_);
+        if (endpoint->Start(config_.sipLocalPort)) {
+            sipEndpoint_ = std::move(endpoint);
+        } else {
+            logger_.Error("SIP transport failed to start; every modem instance will use "
+                           "NullCallController regardless of its own SipServer setting.");
+        }
+    }
 
     for (const ModemInstanceConfig& instanceConfig : config_.modems) {
-        auto instance = std::make_unique<ModemInstance>(instanceConfig, logger_);
+        auto instance = std::make_unique<ModemInstance>(instanceConfig, logger_, sipEndpoint_.get());
         if (!instance->Open()) {
             const std::string label = instanceConfig.name.empty() ? instanceConfig.comPort
                                                                     : instanceConfig.name + "/" + instanceConfig.comPort;

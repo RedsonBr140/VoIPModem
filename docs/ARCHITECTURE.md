@@ -14,10 +14,11 @@ src/
     Core/                  Modem state machine, result codes, call-controller seam
     Hayes/                 AT command parsing
     Serial/                Serial port abstraction + Win32 implementation
+    Sip/                   PJSIP integration (PjsipEndpoint, PjsipCallController)
     Config/                INI loading, AppConfig (one ModemInstanceConfig per line)
     Logging/               Leveled logger + TaggedLogger (per-instance prefix)
   App/                     VoIPModem (executable)
-    Application.*          Loads config, owns the shared Logger, starts/stops all ModemInstances
+    Application.*          Loads config, owns the shared Logger + PjsipEndpoint, starts/stops all ModemInstances
     ModemInstance.*        One modem line: its own port/controller/core/session, own thread
     CommandLineSession.*    Byte-level line buffering, local echo, response framing
     main.cpp               Entry point, Ctrl+C handling
@@ -27,21 +28,28 @@ tests/                     VoIPModem.Tests (executable)
   AtCommandParserTests.cpp
   ModemStateMachineTests.cpp
   FakeCallController.h    Deterministic ICallController test double
+third_party/
+  pjproject/               PJSIP, vendored as a git submodule pinned to release 2.17
+  pjsip-config/            VoIPModem's config_site.h for pjproject (see "SIP integration" below)
+scripts/
+  setup-pjproject.ps1      One-time setup: init submodule + place config_site.h
 ```
 
 ## Dependency direction
 
 ```
 main.cpp -> Application -> ModemInstance (one per modem line) -> CommandLineSession -> ModemStateMachine (Core)
-                                                               \-> WindowsSerialPort (Serial) -> AtCommandParser (Hayes)
-                                                               \-> NullCallController (Core)
+                        \-> PjsipEndpoint (Sip, shared)       \-> WindowsSerialPort (Serial) -> AtCommandParser (Hayes)
+                                                               \-> ICallController (Core)
+                                                                     implemented by: NullCallController | PjsipCallController (Sip)
 ```
 
 `ModemStateMachine` depends only on `ICallController`, never on
-`WindowsSerialPort` or any SIP type. This is deliberate: it is the seam
-where Phase 2's PJSIP-backed call controller plugs in without the state
-machine changing. `ISerialPort` exists for the same reason on the serial
-side, though nothing currently implements it besides `WindowsSerialPort`.
+`WindowsSerialPort`, `pjsua2`, or any other SIP type — `PjsipCallController`
+(src/Lib/Sip) is just the second implementation of that same interface,
+alongside `NullCallController`. `ISerialPort` exists for the same reason
+on the serial side, though nothing currently implements it besides
+`WindowsSerialPort`.
 
 ## Multiple modem instances
 
@@ -85,7 +93,118 @@ shutdown path specifically under multiple instances (it reuses the same
 `Stop()` logic verified for one instance, but hasn't been exercised with
 N > 1 by an actual Ctrl+C rather than a forced process kill).
 
-## What exists today (Phase 1)
+## SIP integration (Phase 2)
+
+PJSIP (pjproject) is vendored as a git submodule at `third_party/pjproject`,
+pinned to release **2.17**, and built from source — there is no vcpkg,
+Conan, or prebuilt-binary distribution of it, confirmed by checking
+both registries and pjproject's own GitHub releases (no binary assets).
+It's built via its own `pjproject-vs14.sln` (Visual Studio project files
+are PJSIP's officially documented Windows build path; CMake support is
+still explicitly experimental and not validated for Windows upstream as
+of 2.17), targeting the `libpjproject` project specifically — not
+`pjsua2_lib` alone, which has zero `ProjectReference`s and only contains
+pjsua2's own wrapper code. `libpjproject` is the aggregate target
+(`LinkLibraryDependencies=true`) that actually bundles pjlib, pjlib-util,
+pjmedia(+codecs), pjnath, pjsip, pjsua, pjsua2, and the third-party
+codecs (speex, GSM, iLBC, G.722.1, SRTP, resample, WebRTC AEC, ...) into
+one combined static lib per config:
+`third_party/pjproject/lib/libpjproject-x86_64-x64-vc14-{Debug,Release}-Static.lib`.
+`PlatformToolset` is overridden to `v145` at the MSBuild command line the
+same way as VoIPModem's own projects — pjproject's checked-in project
+files target the much older `v140`.
+
+**Setup**: run `scripts/setup-pjproject.ps1` once after cloning (it inits
+the submodule if needed and copies `third_party/pjsip-config/config_site.h`
+into `third_party/pjproject/pjlib/include/pj/config_site.h`, which
+pjproject's build requires but deliberately does not track in git —
+same pattern as upstream's own CI, which copies `config_site_test.h` into
+place; see `third_party/pjproject/CLAUDE.md`, pjproject's own agent
+instructions, for confirmation). Then build `third_party/pjproject/pjproject-vs14.sln`
+(target `libpjproject`, configs `Debug-Static`/`Release-Static`, platform
+`x64`) before building `VoIPModem.sln` — `VoIPModemLib` only has the
+pjproject *include* paths; `VoIPModem`/`VoIPModem.Tests` are the ones
+that link the combined `.lib` plus `ws2_32.lib;wsock32.lib;ole32.lib;dsound.lib`.
+`PJ_WIN32` needs no explicit project define — pjproject's own
+`pjlib/include/pj/config.h` derives it from MSVC's always-predefined
+`_WIN32`/`_WIN64`, contrary to some older PJSIP docs pages.
+
+**Architecture**: there is exactly one process-wide `PjsipEndpoint`
+(owned by `Application`, started only if `[SIP] LocalPort` is configured
+and nonzero), wrapping pjsua2's `Endpoint` — pjsua2 only supports one
+`Endpoint` per process, so the UDP transport/port is necessarily
+process-wide, not per-instance. Each `ModemInstance` whose config has a
+`SipServer` gets its own `PjsipCallController`, which registers its own
+SIP account (one extension) against that shared endpoint — multiple
+instances share one UDP port but have independent registrations/calls,
+the same way a real multi-line ATA or PBX extension set works. An
+instance with no `SipServer` configured still gets `NullCallController`,
+unchanged from Phase 1.
+
+**Async call model**: `ICallController::Dial()`/`Answer()` are
+fire-and-forget (changed from Phase 1's synchronous stub-only shape) —
+real SIP signaling resolves later, sometimes seconds later, on PJSIP's
+own worker thread, never synchronously on the calling thread. The
+eventual outcome arrives via `PollEvent()` (non-blocking), which
+`ModemInstance` polls once per read-loop iteration (~every send/receive
+cycle) and routes through `ModemStateMachine::HandleCallEvent()` to
+produce the actual unsolicited `CONNECT`/`NO CARRIER`/`BUSY`/`NO ANSWER`
+response — matching how a real modem behaves (it doesn't print a result
+on the same line as the echoed `ATD` either). `CallEventType::IncomingCall`
+doesn't produce a response by itself; `ModemInstance::PumpIncomingCallRinging()`
+drives the actual `RING` cadence (every `kRingInterval` = 3s) and S0
+auto-answer counting, calling `CommandLineSession::TriggerAutoAnswer()`
+(which just runs `"ATA"` through the normal command path) once the ring
+count reaches the configured `S0` value.
+
+**PJSIP callback thread-safety**: `pj::Account`/`pj::Call` callbacks
+(`onRegState`, `onIncomingCall`, `onCallState`) fire on PJSIP's own
+worker thread, never on the `ModemInstance` thread that calls
+`Dial()`/`Answer()`/`HangUp()`/`PollEvent()`. `PjsipCallController::Impl`
+guards its event queue and call pointers with a mutex. A `pj::Call`
+object is never deleted from inside its own `onCallState` callback (a
+documented pjsua2 hazard — see the nested-class comments in
+`PjsipCallController.cpp`); disconnected calls are moved into a
+"zombies" list instead and actually destroyed on the next `PollEvent()`,
+always safely outside the originating callback's stack. Any thread that
+calls into pjsua2 other than the one that called `PjsipEndpoint::Start()`
+must call `PjsipEndpoint::RegisterCurrentThread()` first — `ModemInstance::RunLoop()`
+does this once at thread start.
+
+**SIP status -> Hayes result code mapping** (`MapSipStatusToResultCode`
+in `PjsipCallController.cpp`) is a deliberately small, documented
+approximation, not a precise protocol mapping: 486/600/603 -> `BUSY`;
+480/408/487/504 -> `NO ANSWER`; everything else (including a normal
+hangup after connecting) -> `NO CARRIER`, matching how a real modem
+reports a connection that never came up or that dropped, for whatever
+reason — real modems don't have a result code for every SIP failure
+mode either.
+
+**PJSIP's own internal logging** (SIP dialogs, transport events, auth)
+is routed into the shared `Logger` via a `pj::LogWriter` subclass
+(`LoggerBridge`, private to `PjsipEndpoint.cpp`), tagged `[SIP]`, per
+CLAUDE.md's "structured logging for... SIP dialogs" rule. In practice a
+handful of very early pjlib bootstrap messages (e.g. "pjlib 2.17 for
+win32 initialized") still print directly to the console before the
+custom writer is attached — cosmetic, not a functional gap, since every
+message that matters (registration result, call state) does go through
+`LoggerBridge`.
+
+**Verified against a real Asterisk test server** (2026-10-13):
+registration succeeded (`SIP registration result: 200 OK`) for a real
+extension, and `ATD` to an unroutable number dialed through the real
+SIP stack and correctly produced `NO CARRIER` on the actual serial port
+after the async round-trip — not a mock, and not just a unit test.
+**Not yet verified**: an actual *incoming* call (RING generation, `ATA`
+accepting a real call, S0 auto-answer) — this needs a second endpoint
+to call extension 1003 from, which wasn't available during this
+session's testing. Do this before considering Phase 2's incoming-call
+requirement (mandatory per `PROJECT_SPEC.md`) actually proven. Also not
+yet verified: the graceful Ctrl+C shutdown path now that it has to tear
+down `PjsipCallController`/`PjsipEndpoint` too (only forced-process-kill
+shutdown has been exercised with SIP active so far).
+
+## What exists today
 
 - **Hayes parser** (`AtCommandParser`): parses `AT`, `ATI`, `ATZ`, `ATE`,
   `ATV`, `ATQ`, `ATS<n>=<v>`, `ATS<n>?`, `ATD`/`ATDT`/`ATDP`, `ATA`, `ATH`, `AT&F`,
@@ -96,17 +215,17 @@ N > 1 by an actual Ctrl+C rather than a forced process kill).
 - **Modem core** (`ModemStateMachine`): owns the ATE/ATV/ATQ profile and a
   10-register S-register bank, executes parsed commands, and tracks
   `ModemState` (CommandMode / Dialing / Answering / Negotiating /
-  OnlineData / Disconnecting). Only CommandMode is actually reachable
-  today; Dialing/Answering are entered and exited within a single
-  `Execute()` call because the only `ICallController` implementation is a
-  stub.
-- **Call controller stub** (`NullCallController`): every `ATD` returns
-  `NO CARRIER`, every `ATA` returns `NO ANSWER`. It exists so the dial/answer
-  code paths in the state machine are real and tested, without pretending
-  there is a telephony backend. **There is no SIP/RTP integration.** Each
-  `ModemInstance` currently gets its own `NullCallController`; Phase 2 is
-  expected to give each instance its own SIP-backed `ICallController`
-  instead, tied to that instance's own extension.
+  OnlineData / Disconnecting). `Execute()` never resolves `ATD`/`ATA`
+  itself — see "SIP integration (Phase 2)" above for the async model;
+  `HandleCallEvent()` is what actually transitions into
+  `OnlineData`/back to `CommandMode` once a real call result exists.
+- **Call controller** (`ICallController`): two implementations now.
+  `NullCallController` is the Phase 1 stub — every `ATD` honestly returns
+  `NO CARRIER`, every `ATA` returns `NO ANSWER`, no SIP/RTP involved — used
+  for any `ModemInstance` with no `SipServer` configured.
+  `PjsipCallController` (src/Lib/Sip) is the real, PJSIP-backed
+  implementation added in Phase 2; see "SIP integration (Phase 2)" above
+  for its design and what's been verified.
 - **Serial I/O** (`WindowsSerialPort`): opens a real or virtual (com0com)
   COM port via Win32, sets 8N1 with no flow control, and does blocking
   byte-at-a-time reads with a timeout. Manually verified end-to-end
@@ -154,33 +273,34 @@ N > 1 by an actual Ctrl+C rather than a forced process kill).
 - **Config** (`IniConfig` / `AppConfig`): flat `[Section] key=value` INI
   parser, now with section discovery (`IniConfig::SectionNames()`) so
   `AppConfig` can find a variable number of `[Modem.<name>]` sections —
-  see "Multiple modem instances" above. Only reads the keys Phase 1
-  actually uses per instance (`ComPort`, `BaudRate`, `Identification`,
-  `AutoAnswerRingCount`) plus top-level `Logging.Level`/`Logging.File`.
-  SIP/RTP/DSP keys from `PROJECT_SPEC.md` section 5 are **not yet read by
-  any code** and are intentionally absent from `ModemInstanceConfig`
-  until Phase 2+ adds the modules that consume them.
+  see "Multiple modem instances" above. Per-instance keys:
+  `ComPort`, `BaudRate`, `Identification`, `AutoAnswerRingCount`,
+  `SipServer`, `SipExtension`, `SipPassword`, `SipRealm`; top-level:
+  `Logging.Level`/`Logging.File`, `SIP.LocalPort`. RTP/DSP-specific keys
+  (codec preferences, etc.) from `PROJECT_SPEC.md` section 5 are **not
+  yet read by any code** and are intentionally absent from
+  `ModemInstanceConfig` until Phase 3 adds the modules that consume them.
 - **Logging** (`Logger` / `TaggedLogger`): `Logger` is leveled
   (Error/Warn/Info/Debug), writes to an optional file, echoes Warn/Error
   to stderr, and is mutex-protected so multiple `ModemInstance` threads
   can share one safely. `TaggedLogger` wraps it to prefix every message
-  with an instance name. No credentials exist in the system yet, so
-  there is nothing to accidentally log — this will matter once SIP auth
-  is added in Phase 2.
+  with an instance name. SIP credentials (`SipPassword`) now exist in
+  config — neither `PjsipCallController` nor `AppConfig`/`ModemInstance`
+  log the password anywhere; only the extension/server/registration
+  result get logged, per CLAUDE.md's "keep credentials out of logs" rule.
 
 ## What does not exist yet
 
-- SIP/RTP transport (Phase 2/3) — `NullCallController` is the only
-  `ICallController`.
+- RTP/audio transport (Phase 3) — SIP *signaling* works
+  (`PjsipCallController`), but no media is negotiated or carried;
+  `PjsipEndpoint::Start()` explicitly sets a null audio device.
 - Modem DSP / modulation / demodulation (Phase 4) — no audio or bitstream
   processing exists anywhere in the codebase.
 - RAS/PPP integration (Phase 5).
-- Online data mode: `ModemState::OnlineData` is defined but nothing ever
-  transitions into it, because nothing can currently negotiate a
-  connection to go online with.
-- Auto-answer on an incoming call: `ATS0=n`/`ATS0?` read and write the
-  register correctly, but nothing triggers auto-answer, because there is
-  no SIP layer to generate a RING event in the first place.
+- Actual data flow in online mode: `ModemState::OnlineData` is now reached
+  (via `HandleCallEvent(Connected)` once a real SIP call connects), but
+  nothing carries data through it yet — that's the DSP/modulation work in
+  Phase 4, once Phase 3 gives it real RTP audio to modulate onto.
 
 ## Known simplifications (not bugs)
 
@@ -190,3 +310,10 @@ N > 1 by an actual Ctrl+C rather than a forced process kill).
   command buffer without replicating its exact overflow behavior.
 - `ATA`/`ATH` do not currently accept trailing digits (e.g. `ATH1`); the
   spec's required subset only calls for the bare forms.
+- `RING` is emitted on a fixed 3-second interval (`ModemInstance::kRingInterval`)
+  rather than real telco ring cadence (2s on / 4s off) — there's no
+  physical ringing signal to time against over SIP, so this is a
+  reasonable fixed substitute, not a measured value.
+- A second incoming call while one is already active/ringing is rejected
+  with SIP 486 Busy Here rather than queued — a modem line only ever
+  handles one call at a time, same as a real modem.

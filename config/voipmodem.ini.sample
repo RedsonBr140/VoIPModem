@@ -1,17 +1,24 @@
-; VoIPModem configuration — Phase 1 (serial/Hayes skeleton) subset only.
+; VoIPModem configuration — Phase 1 (serial/Hayes skeleton) + Phase 2 (SIP).
 ; Copy this file to voipmodem.ini next to the executable (or pass a path
 ; as the first command-line argument) and adjust as needed.
 ;
-; SIP/RTP/DSP settings described in docs/PROJECT_SPEC.md section 5 are not
-; yet read by any code and are intentionally omitted here; they will be
-; added per modem instance alongside Phase 2 (SIP), where each instance
-; gets its own SIP extension/credentials the same way it already gets its
-; own ComPort below.
+; RTP/DSP codec settings described in docs/PROJECT_SPEC.md section 5 are
+; not yet read by any code and are intentionally omitted here; they will
+; be added once Phase 3 adds the modules that consume them.
 
 [Logging]
 ; One of: Error, Warn, Info, Debug
 Level=Info
 File=voipmodem.log
+
+; Process-wide SIP transport. Required (nonzero) for any modem instance's
+; SipServer setting below to actually do anything — without it, every
+; instance falls back to NullCallController (ATD/ATA honestly fail)
+; regardless of its own Sip* settings. One UDP port is shared by every
+; instance's SIP account; see docs/ARCHITECTURE.md "SIP integration
+; (Phase 2)" for why this is process-wide rather than per-instance.
+[SIP]
+LocalPort=5060
 
 ; --- Single modem line (legacy Phase 1 form) ---
 ; A bare [Modem] section configures exactly one modem line and is still
@@ -26,30 +33,48 @@ ComPort=COM3
 BaudRate=115200
 
 ; Text returned by ATI.
-Identification=VoIPModem Virtual Modem (Phase 1)
+Identification=VoIPModem Virtual Modem
 
-; S0 register initial value (auto-answer ring count). Stored and queryable
-; via ATS0=/ATS0?, but nothing currently triggers auto-answer on a RING
-; event, since there is no SIP layer to produce one.
+; S0 register initial value (auto-answer ring count). 0 disables
+; auto-answer (ATA must be typed manually); a value > 0 answers
+; automatically after that many RING lines.
 AutoAnswerRingCount=0
+
+; SIP registration for this instance's extension. Leave SipServer empty
+; (or omit these four keys entirely) to keep this instance on
+; NullCallController — ATD/ATA will honestly return NO CARRIER/NO ANSWER
+; instead of silently doing nothing. Fill in your own Asterisk server and
+; extension credentials below — do not commit real credentials here;
+; voipmodem.ini itself is gitignored for exactly that reason.
+; SipServer=sip.example.com:5060
+; SipExtension=1001
+; SipPassword=changeme
+; SipRealm=*   ; default; only needed if Asterisk challenges with a specific realm
 
 ; --- Multiple modem lines ---
 ; To run more than one modem line at once, delete the [Modem] section
 ; above and add one [Modem.<name>] section per line instead, each with
-; its own ComPort (and, from Phase 2 on, its own SIP extension). <name>
-; is only used to label that line's log output — pick anything readable.
-; Each line runs on its own thread with its own state machine, entirely
-; independent of the others. See docs/ARCHITECTURE.md "Multiple modem
-; instances".
+; its own ComPort and its own SIP extension. <name> is only used to label
+; that line's log output — pick anything readable. Each line runs on its
+; own thread with its own state machine, entirely independent of the
+; others, but all share the one [SIP] LocalPort transport. See
+; docs/ARCHITECTURE.md "Multiple modem instances" and "SIP integration
+; (Phase 2)".
 ;
 ; [Modem.Line1]
 ; ComPort=COM3
 ; BaudRate=115200
 ; Identification=VoIPModem Virtual Modem (Line1)
 ; AutoAnswerRingCount=0
+; SipServer=sip.example.com:5060
+; SipExtension=1001
+; SipPassword=changeme
 ;
 ; [Modem.Line2]
 ; ComPort=COM5
 ; BaudRate=115200
 ; Identification=VoIPModem Virtual Modem (Line2)
 ; AutoAnswerRingCount=0
+; SipServer=sip.example.com:5060
+; SipExtension=1002
+; SipPassword=changeme-too

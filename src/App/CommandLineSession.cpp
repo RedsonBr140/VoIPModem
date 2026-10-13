@@ -89,4 +89,19 @@ void CommandLineSession::SendResponse(const ExecutionOutcome& outcome) {
     }
 }
 
+void CommandLineSession::SendUnsolicited(const ExecutionOutcome& outcome) {
+    SendResponse(outcome);
+}
+
+void CommandLineSession::SendUnsolicitedRing() {
+    ExecutionOutcome outcome;
+    outcome.finalResult = ResultCode::Ring;
+    outcome.suppressFinalResult = core_.Profile().quietMode;
+    SendResponse(outcome);
+}
+
+void CommandLineSession::TriggerAutoAnswer() {
+    ProcessLine("ATA");
+}
+
 } // namespace voipmodem
