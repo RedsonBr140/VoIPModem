@@ -36,7 +36,9 @@ ModemInstance::ModemInstance(ModemInstanceConfig config, Logger& sharedLogger, P
       serialPort_(logger_),
       callController_(MakeCallController(config_, sipEndpoint, logger_)),
       core_(*callController_, logger_, config_.modemIdentification),
-      session_(serialPort_, core_, logger_) {}
+      session_(serialPort_, core_, logger_) {
+    core_.InitializeAutoAnswerRegister(config_.autoAnswerRingCount);
+}
 
 bool ModemInstance::Open() {
     return serialPort_.Open(config_.comPort, config_.baudRate);

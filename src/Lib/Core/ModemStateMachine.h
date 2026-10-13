@@ -52,6 +52,12 @@ public:
     // uses this to drive RING cadence and S0 auto-answer counting.
     bool HasIncomingCall() const { return hasIncomingCall_; }
 
+    // Seeds S0 (auto-answer ring count) from config at startup — the
+    // config value (AutoAnswerRingCount=) only ever reaches the register
+    // this way; it is not re-applied by ATZ/AT&F, which reset S0 to 0
+    // like any other hardware factory default, not back to this value.
+    void InitializeAutoAnswerRegister(int rings) { registers_.Set(0, static_cast<uint8_t>(rings)); }
+
     ModemState CurrentState() const { return state_; }
     const ModemProfile& Profile() const { return profile_; }
     const SRegisters& Registers() const { return registers_; }

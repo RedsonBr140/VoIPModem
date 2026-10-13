@@ -195,14 +195,17 @@ registration succeeded (`SIP registration result: 200 OK`) for a real
 extension, and `ATD` to an unroutable number dialed through the real
 SIP stack and correctly produced `NO CARRIER` on the actual serial port
 after the async round-trip — not a mock, and not just a unit test.
-**Not yet verified**: an actual *incoming* call (RING generation, `ATA`
-accepting a real call, S0 auto-answer) — this needs a second endpoint
-to call extension 1003 from, which wasn't available during this
-session's testing. Do this before considering Phase 2's incoming-call
-requirement (mandatory per `PROJECT_SPEC.md`) actually proven. Also not
-yet verified: the graceful Ctrl+C shutdown path now that it has to tear
-down `PjsipCallController`/`PjsipEndpoint` too (only forced-process-kill
-shutdown has been exercised with SIP active so far).
+A real incoming call was also tested live: **RING generation and `ATA`
+both confirmed working.** Auto-answer did not, and the cause was a real
+bug, not just an unverified path: `ModemInstanceConfig::autoAnswerRingCount`
+was parsed from `AutoAnswerRingCount=` but never written into the S0
+register anywhere, so it silently had no effect unless `ATS0=n` was
+typed manually first. Fixed via `ModemStateMachine::InitializeAutoAnswerRegister()`,
+called from `ModemInstance`'s constructor — **re-verify auto-answer
+specifically** against a real incoming call before treating it as done.
+Also not yet verified: the graceful Ctrl+C shutdown path now that it has
+to tear down `PjsipCallController`/`PjsipEndpoint` too (only
+forced-process-kill shutdown has been exercised with SIP active so far).
 
 ## What exists today
 

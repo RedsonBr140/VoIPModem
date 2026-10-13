@@ -81,6 +81,29 @@ TEST(SetThenQueryRegister_RoundTrips) {
     EXPECT_EQ(outcome.infoLines[0], std::string("003"));
 }
 
+TEST(S0Register_DefaultsToZero_AutoAnswerDisabled) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    EXPECT_EQ(core.Registers().Get(0), 0);
+}
+
+TEST(InitializeAutoAnswerRegister_SeedsS0FromConfig) {
+    // Regression test: ModemInstanceConfig::autoAnswerRingCount was parsed
+    // from the INI but never actually reached the S0 register, so
+    // AutoAnswerRingCount=N in config silently did nothing unless the user
+    // manually typed ATS0=N over the serial line.
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    core.InitializeAutoAnswerRegister(2);
+    EXPECT_EQ(core.Registers().Get(0), 2);
+}
+
 TEST(Dial_HasNoImmediateResult) {
     // Real call setup resolves later (see ICallController); Execute()
     // itself must not print CONNECT/NO CARRIER/etc. immediately.

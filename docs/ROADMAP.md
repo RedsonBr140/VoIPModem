@@ -91,13 +91,18 @@ Done:
   and correctly produced `NO CARRIER` on the actual serial port — not a
   mock, not just a unit test.
 
+Then live-tested by the user against a real incoming call: **RING and
+`ATA` both confirmed working.** Auto-answer did not — root cause was a
+real bug, not just an untested path: `ModemInstanceConfig::autoAnswerRingCount`
+(`AutoAnswerRingCount=` in the INI) was parsed but never actually written
+into the S0 register, so it silently did nothing unless `ATS0=n` was
+typed manually first. Fixed via `ModemStateMachine::InitializeAutoAnswerRegister()`,
+called once from `ModemInstance`'s constructor. Covered by a regression
+test (`InitializeAutoAnswerRegister_SeedsS0FromConfig`); **re-verify
+against a real incoming call** before considering auto-answer done — the
+RING/ATA path was already proven live, but this specific fix hasn't been.
+
 Not yet verified:
-- **An actual incoming call** — RING generation, `ATA` accepting a real
-  call, and S0 auto-answer have unit-test coverage but no live test; this
-  needs a second endpoint to call extension 1003 from, which wasn't
-  available this session. Per `PROJECT_SPEC.md`, "an implementation that
-  only places outgoing calls is insufficient" — **do this next**, before
-  treating Phase 2 as done.
 - A real successful outgoing call reaching `CONNECT` (only an
   unroutable-number failure path was exercised live).
 - Graceful Ctrl+C shutdown with a `PjsipCallController`/`PjsipEndpoint`
@@ -128,7 +133,6 @@ client — has not been started.
 
 ## Recommended next step
 
-Place or receive a real call against extension 1003 to verify the
-incoming-call path (RING, `ATA`, S0 auto-answer) and a successful
-`CONNECT`, closing Phase 2's one remaining gap, before starting Phase 3
-(RTP audio).
+RING and `ATA` are confirmed live; re-verify auto-answer specifically
+(now that the S0-from-config bug is fixed) and a successful outgoing
+`CONNECT`, then Phase 2 is done and Phase 3 (RTP audio) can start.
