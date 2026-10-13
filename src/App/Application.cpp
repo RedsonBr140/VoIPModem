@@ -1,6 +1,10 @@
 #include "Application.h"
 
 #include <atomic>
+#include <chrono>
+#include <thread>
+
+#include "../Lib/Config/IniConfig.h"
 
 namespace voipmodem {
 
@@ -21,37 +25,42 @@ void RequestStop() {
 }
 
 Application::Application(std::string configPath)
-    : configPath_(std::move(configPath)),
-      config_(LoadConfig(configPath_)),
-      serialPort_(logger_),
-      callController_(logger_),
-      core_(callController_, logger_, config_.modemIdentification),
-      session_(serialPort_, core_, logger_) {}
+    : configPath_(std::move(configPath)), config_(LoadConfig(configPath_)) {}
 
 int Application::Run() {
     logger_.Init(config_.logLevel, config_.logFilePath);
     logger_.Info("VoIPModem starting (Phase 1: Hayes command skeleton, no SIP/DSP backend yet)");
 
-    if (!serialPort_.Open(config_.comPort, config_.baudRate)) {
-        logger_.Error("Unable to open " + config_.comPort + "; exiting.");
+    for (const ModemInstanceConfig& instanceConfig : config_.modems) {
+        auto instance = std::make_unique<ModemInstance>(instanceConfig, logger_);
+        if (!instance->Open()) {
+            const std::string label = instanceConfig.name.empty() ? instanceConfig.comPort
+                                                                    : instanceConfig.name + "/" + instanceConfig.comPort;
+            logger_.Error("Failed to open modem instance '" + label + "'; skipping it.");
+            continue; // one bad port shouldn't take down the others
+        }
+        instances_.push_back(std::move(instance));
+    }
+
+    if (instances_.empty()) {
+        logger_.Error("No modem instance could be opened; exiting.");
         return 1;
     }
 
-    logger_.Info("Listening on " + config_.comPort + " at " + std::to_string(config_.baudRate) +
-                 " baud. Identification string: " + config_.modemIdentification);
+    for (auto& instance : instances_) {
+        instance->Start();
+    }
 
-    while (serialPort_.IsOpen() && !g_stopRequested) {
-        uint8_t byte = 0;
-        if (serialPort_.ReadByte(byte)) {
-            session_.OnByteReceived(byte);
-        }
-        // A false return from ReadByte() is the expected outcome of the
-        // port's read timeout when nothing arrived; IsOpen() is what
-        // detects an actually closed/failed port.
+    logger_.Info(std::to_string(instances_.size()) + " modem instance(s) running. Press Ctrl+C to stop.");
+
+    while (!g_stopRequested) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
     logger_.Info("VoIPModem shutting down");
-    serialPort_.Close();
+    for (auto& instance : instances_) {
+        instance->Stop();
+    }
     return 0;
 }
 

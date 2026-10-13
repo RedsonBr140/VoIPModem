@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <sstream>
 
 namespace voipmodem {
 
@@ -31,7 +32,16 @@ bool IniConfig::LoadFromFile(const std::string& path) {
     if (!in.is_open()) {
         return false;
     }
+    Parse(in);
+    return true;
+}
 
+void IniConfig::LoadFromString(const std::string& content) {
+    std::istringstream in(content);
+    Parse(in);
+}
+
+void IniConfig::Parse(std::istream& in) {
     std::string currentSection;
     std::string rawLine;
     while (std::getline(in, rawLine)) {
@@ -41,7 +51,11 @@ bool IniConfig::LoadFromFile(const std::string& path) {
         }
 
         if (line.front() == '[' && line.back() == ']') {
-            currentSection = ToUpper(Trim(line.substr(1, line.size() - 2)));
+            const std::string rawName = Trim(line.substr(1, line.size() - 2));
+            currentSection = ToUpper(rawName);
+            if (sections_.find(currentSection) == sections_.end()) {
+                sectionOrder_.push_back(rawName);
+            }
             sections_.emplace(currentSection, KeyValueMap{});
             continue;
         }
@@ -55,8 +69,6 @@ bool IniConfig::LoadFromFile(const std::string& path) {
         const std::string value = Trim(line.substr(eq + 1));
         sections_[currentSection][key] = value;
     }
-
-    return true;
 }
 
 std::string IniConfig::GetString(const std::string& section, const std::string& key,

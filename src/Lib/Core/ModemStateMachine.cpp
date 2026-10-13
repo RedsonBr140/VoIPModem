@@ -15,7 +15,7 @@ std::string FormatRegisterValue(int value) {
 
 } // namespace
 
-ModemStateMachine::ModemStateMachine(ICallController& callController, Logger& logger,
+ModemStateMachine::ModemStateMachine(ICallController& callController, TaggedLogger& logger,
                                       std::string identification)
     : callController_(callController), logger_(logger), identification_(std::move(identification)) {}
 

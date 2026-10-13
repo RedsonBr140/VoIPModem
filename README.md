@@ -28,9 +28,12 @@ Or open `VoIPModem.sln` in Visual Studio and build normally. Only
    built `VoIPModem.exe`, or anywhere, and pass its path as the first
    command-line argument) and set `ComPort` to a port you actually have
    — a com0com virtual pair for development, per
-   `docs/PROJECT_SPEC.md` section 3.
+   `docs/PROJECT_SPEC.md` section 3. One `[Modem]` section runs a single
+   line; replace it with one `[Modem.<name>]` section per line to run
+   several modems at once, each on its own COM port and its own thread
+   (see `docs/ARCHITECTURE.md` "Multiple modem instances").
 2. Run `VoIPModem.exe [path-to-ini]`.
-3. Open the other side of the COM pair in a terminal emulator and type
+3. Open the other side of each COM pair in a terminal emulator and type
    `AT`, `ATI`, `ATZ`, etc.
 4. Stop with Ctrl+C.
 

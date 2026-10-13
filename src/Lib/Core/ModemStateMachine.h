@@ -9,7 +9,7 @@
 #include "ResultCodes.h"
 #include "SRegisters.h"
 #include "../Hayes/AtCommand.h"
-#include "../Logging/Logger.h"
+#include "../Logging/TaggedLogger.h"
 
 namespace voipmodem {
 
@@ -31,7 +31,7 @@ struct ExecutionOutcome {
 // Dial()/Answer() are backed by a stub (Phase 1) or real SIP (Phase 2+).
 class ModemStateMachine {
 public:
-    ModemStateMachine(ICallController& callController, Logger& logger, std::string identification);
+    ModemStateMachine(ICallController& callController, TaggedLogger& logger, std::string identification);
 
     ExecutionOutcome Execute(const AtParseResult& parsed);
 
@@ -43,7 +43,7 @@ private:
     static ResultCode ToResultCode(CallOutcome outcome);
 
     ICallController& callController_;
-    Logger& logger_;
+    TaggedLogger& logger_;
     std::string identification_;
     ModemState state_ = ModemState::CommandMode;
     ModemProfile profile_;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ICallController.h"
-#include "../Logging/Logger.h"
+#include "../Logging/TaggedLogger.h"
 
 namespace voipmodem {
 
@@ -12,7 +12,7 @@ namespace voipmodem {
 // Phase 2 wires in PJSIP.
 class NullCallController : public ICallController {
 public:
-    explicit NullCallController(Logger& logger) : logger_(logger) {}
+    explicit NullCallController(TaggedLogger& logger) : logger_(logger) {}
 
     CallOutcome Dial(const std::string& number) override {
         logger_.Warn("ATD requested dial to '" + number +
@@ -30,7 +30,7 @@ public:
     }
 
 private:
-    Logger& logger_;
+    TaggedLogger& logger_;
 };
 
 } // namespace voipmodem

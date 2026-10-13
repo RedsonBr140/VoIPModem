@@ -14,14 +14,16 @@ src/
     Core/                  Modem state machine, result codes, call-controller seam
     Hayes/                 AT command parsing
     Serial/                Serial port abstraction + Win32 implementation
-    Config/                INI loading, AppConfig
-    Logging/                Leveled logger
+    Config/                INI loading, AppConfig (one ModemInstanceConfig per line)
+    Logging/               Leveled logger + TaggedLogger (per-instance prefix)
   App/                     VoIPModem (executable)
-    Application.*          Wires config/logging/serial/core together, runs the read loop
+    Application.*          Loads config, owns the shared Logger, starts/stops all ModemInstances
+    ModemInstance.*        One modem line: its own port/controller/core/session, own thread
     CommandLineSession.*    Byte-level line buffering, local echo, response framing
     main.cpp               Entry point, Ctrl+C handling
 tests/                     VoIPModem.Tests (executable)
   TestFramework.h          Hand-rolled registration/assert macros (no external dependency)
+  AppConfigTests.cpp
   AtCommandParserTests.cpp
   ModemStateMachineTests.cpp
   FakeCallController.h    Deterministic ICallController test double
@@ -30,9 +32,9 @@ tests/                     VoIPModem.Tests (executable)
 ## Dependency direction
 
 ```
-main.cpp -> Application -> CommandLineSession -> ModemStateMachine (Core)
-                        \-> WindowsSerialPort (Serial)      -> AtCommandParser (Hayes)
-                        \-> NullCallController (Core)
+main.cpp -> Application -> ModemInstance (one per modem line) -> CommandLineSession -> ModemStateMachine (Core)
+                                                               \-> WindowsSerialPort (Serial) -> AtCommandParser (Hayes)
+                                                               \-> NullCallController (Core)
 ```
 
 `ModemStateMachine` depends only on `ICallController`, never on
@@ -40,6 +42,48 @@ main.cpp -> Application -> CommandLineSession -> ModemStateMachine (Core)
 where Phase 2's PJSIP-backed call controller plugs in without the state
 machine changing. `ISerialPort` exists for the same reason on the serial
 side, though nothing currently implements it besides `WindowsSerialPort`.
+
+## Multiple modem instances
+
+Each configured modem line is a `ModemInstance` (src/App), owning its
+own `WindowsSerialPort`, `ICallController`, `ModemStateMachine`, and
+`CommandLineSession`, and running its own read loop on its own
+`std::thread`. Instances do not share any serial, core, or session state
+with each other — they only share the top-level `Logger` (via a
+`TaggedLogger` wrapper that prefixes each instance's log lines with its
+name, e.g. `[Line1]`), which is safe because `Logger::Log` is already
+mutex-protected.
+
+`Application` itself owns no serial port, call controller, or state
+machine — it only loads config, owns the shared `Logger`, and manages
+the `ModemInstance` collection's lifecycle (open each port, start each
+thread, wait for a stop request, stop each instance). This mirrors the
+`ICallController` seam: a future per-instance SIP registration (Phase 2)
+is expected to plug into `ModemInstance` the same way, one extension per
+instance, without `Application` needing to change.
+
+Config: `[Modem]` (no suffix) configures exactly one unnamed instance,
+preserved for backward compatibility with pre-multi-instance Phase 1
+configs. `[Modem.<name>]` — one section per line — configures N named
+instances; `<name>` only affects log-line prefixes. `AppConfig.modems`
+always has at least one entry (falls back to a single default instance
+if the INI defines none). See `config/voipmodem.ini.sample`.
+
+If one instance's `Open()` fails (e.g. a configured COM port doesn't
+exist), `Application` logs it and skips that instance rather than
+aborting the whole process — the other configured lines still start.
+Only if *every* instance fails to open does `Application::Run()` return
+a non-zero exit code.
+
+Manually smoke-tested: a two-instance config (`[Modem.Line1]` on COM3,
+`[Modem.Line2]` on COM5) opened both ports concurrently and logged
+correctly tagged output from both. **Not yet tested**: a terminal
+emulator actually exchanging AT commands with two instances at once
+(only single-instance command-mode behavior has had that level of
+testing so far — see `docs/ROADMAP.md`), and the graceful Ctrl+C
+shutdown path specifically under multiple instances (it reuses the same
+`Stop()` logic verified for one instance, but hasn't been exercised with
+N > 1 by an actual Ctrl+C rather than a forced process kill).
 
 ## What exists today (Phase 1)
 
@@ -57,7 +101,10 @@ side, though nothing currently implements it besides `WindowsSerialPort`.
 - **Call controller stub** (`NullCallController`): every `ATD` returns
   `NO CARRIER`, every `ATA` returns `NO ANSWER`. It exists so the dial/answer
   code paths in the state machine are real and tested, without pretending
-  there is a telephony backend. **There is no SIP/RTP integration.**
+  there is a telephony backend. **There is no SIP/RTP integration.** Each
+  `ModemInstance` currently gets its own `NullCallController`; Phase 2 is
+  expected to give each instance its own SIP-backed `ICallController`
+  instead, tied to that instance's own extension.
 - **Serial I/O** (`WindowsSerialPort`): opens a real or virtual (com0com)
   COM port via Win32, sets 8N1 with no flow control, and does blocking
   byte-at-a-time reads with a timeout. Manually verified end-to-end
@@ -79,15 +126,21 @@ side, though nothing currently implements it besides `WindowsSerialPort`.
   terminator some real modems use in V0 — a deliberate simplification for
   terminal-emulator compatibility, not a bug.
 - **Config** (`IniConfig` / `AppConfig`): flat `[Section] key=value` INI
-  parser. Only reads the keys Phase 1 actually uses (`ComPort`, `BaudRate`,
-  `Identification`, `AutoAnswerRingCount`, `Logging.Level`, `Logging.File`).
+  parser, now with section discovery (`IniConfig::SectionNames()`) so
+  `AppConfig` can find a variable number of `[Modem.<name>]` sections —
+  see "Multiple modem instances" above. Only reads the keys Phase 1
+  actually uses per instance (`ComPort`, `BaudRate`, `Identification`,
+  `AutoAnswerRingCount`) plus top-level `Logging.Level`/`Logging.File`.
   SIP/RTP/DSP keys from `PROJECT_SPEC.md` section 5 are **not yet read by
-  any code** and are intentionally absent from `AppConfig` until Phase 2+
-  adds the modules that consume them.
-- **Logging** (`Logger`): leveled (Error/Warn/Info/Debug), writes to an
-  optional file and echoes Warn/Error to stderr. No credentials exist in
-  the system yet, so there is nothing to accidentally log — this will
-  matter once SIP auth is added in Phase 2.
+  any code** and are intentionally absent from `ModemInstanceConfig`
+  until Phase 2+ adds the modules that consume them.
+- **Logging** (`Logger` / `TaggedLogger`): `Logger` is leveled
+  (Error/Warn/Info/Debug), writes to an optional file, echoes Warn/Error
+  to stderr, and is mutex-protected so multiple `ModemInstance` threads
+  can share one safely. `TaggedLogger` wraps it to prefix every message
+  with an instance name. No credentials exist in the system yet, so
+  there is nothing to accidentally log — this will matter once SIP auth
+  is added in Phase 2.
 
 ## What does not exist yet
 

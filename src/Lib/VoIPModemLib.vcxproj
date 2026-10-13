@@ -77,6 +77,7 @@
     <ClInclude Include="Config\AppConfig.h" />
     <ClInclude Include="Config\IniConfig.h" />
     <ClInclude Include="Logging\Logger.h" />
+    <ClInclude Include="Logging\TaggedLogger.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Core\ModemStateMachine.cpp" />

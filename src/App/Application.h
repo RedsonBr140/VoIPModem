@@ -2,13 +2,11 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
-#include "CommandLineSession.h"
+#include "ModemInstance.h"
 #include "../Lib/Config/AppConfig.h"
-#include "../Lib/Core/ModemStateMachine.h"
-#include "../Lib/Core/NullCallController.h"
 #include "../Lib/Logging/Logger.h"
-#include "../Lib/Serial/WindowsSerialPort.h"
 
 namespace voipmodem {
 
@@ -16,10 +14,12 @@ namespace voipmodem {
 // opportunity. Safe to call from a console control handler (Ctrl+C).
 void RequestStop();
 
-// Wires together config, logging, the serial port, the Phase 1 stub call
-// controller, and the modem core, then runs the blocking read loop that
-// drives command-mode AT processing. See docs/ARCHITECTURE.md for how
-// this fits the rest of the (currently unbuilt) system.
+// Top-level orchestrator: loads config, initializes the shared logger,
+// opens and starts one ModemInstance per configured modem line, then
+// waits for a stop request before shutting all instances down cleanly.
+// Owns no serial port, call controller, or state machine itself — those
+// belong to ModemInstance, one per modem line. See
+// docs/ARCHITECTURE.md "Multiple modem instances".
 class Application {
 public:
     explicit Application(std::string configPath);
@@ -31,10 +31,7 @@ private:
     std::string configPath_;
     Logger logger_;
     AppConfig config_;
-    WindowsSerialPort serialPort_;
-    NullCallController callController_;
-    ModemStateMachine core_;
-    CommandLineSession session_;
+    std::vector<std::unique_ptr<ModemInstance>> instances_;
 };
 
 } // namespace voipmodem

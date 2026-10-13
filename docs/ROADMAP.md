@@ -18,7 +18,19 @@ Done:
 - `AT`, `ATI`, `ATZ`, `ATE`, `ATV`, `ATQ`, `ATS<n>=`/`ATS<n>?`,
   `ATD`/`ATDT`/`ATDP`, `ATA`, `ATH`, `AT&F` parsing and execution, with
   correct result codes.
-- 33 unit tests covering the parser and state machine, all passing.
+- 38 unit tests covering the parser, state machine, and config loading,
+  all passing.
+- **Multiple concurrent modem instances**, each with its own COM port
+  (and, from Phase 2 on, its own SIP extension): see
+  `docs/ARCHITECTURE.md` "Multiple modem instances". Added ahead of
+  Phase 2 specifically so SIP integration starts with the per-instance
+  boundary already in place, rather than retrofitting it later. A
+  two-instance config was smoke-tested (both COM ports opened and ran
+  concurrently without crashing), but **not yet verified with a terminal
+  emulator exchanging AT commands against two instances at once**, and
+  the graceful-shutdown path hasn't been exercised with N > 1 instances
+  via an actual Ctrl+C (only via a forced process kill so far). Do this
+  before relying on it for Phase 2 testing.
 - Full solution builds clean (0 warnings at `/W4`) with MSVC 14.51
   (toolset `v145`) via `VoIPModem.sln`.
 - **Manually verified end-to-end against a com0com virtual pair and a

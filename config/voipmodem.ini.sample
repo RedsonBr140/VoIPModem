@@ -4,8 +4,18 @@
 ;
 ; SIP/RTP/DSP settings described in docs/PROJECT_SPEC.md section 5 are not
 ; yet read by any code and are intentionally omitted here; they will be
-; added alongside the Phase 2+ modules that consume them.
+; added per modem instance alongside Phase 2 (SIP), where each instance
+; gets its own SIP extension/credentials the same way it already gets its
+; own ComPort below.
 
+[Logging]
+; One of: Error, Warn, Info, Debug
+Level=Info
+File=voipmodem.log
+
+; --- Single modem line (legacy Phase 1 form) ---
+; A bare [Modem] section configures exactly one modem line and is still
+; fully supported. Use this if you only have one COM port to dial through.
 [Modem]
 ; Virtual COM port created by com0com (see docs/PROJECT_SPEC.md section 3).
 ComPort=COM3
@@ -23,7 +33,23 @@ Identification=VoIPModem Virtual Modem (Phase 1)
 ; event, since there is no SIP layer to produce one.
 AutoAnswerRingCount=0
 
-[Logging]
-; One of: Error, Warn, Info, Debug
-Level=Info
-File=voipmodem.log
+; --- Multiple modem lines ---
+; To run more than one modem line at once, delete the [Modem] section
+; above and add one [Modem.<name>] section per line instead, each with
+; its own ComPort (and, from Phase 2 on, its own SIP extension). <name>
+; is only used to label that line's log output — pick anything readable.
+; Each line runs on its own thread with its own state machine, entirely
+; independent of the others. See docs/ARCHITECTURE.md "Multiple modem
+; instances".
+;
+; [Modem.Line1]
+; ComPort=COM3
+; BaudRate=115200
+; Identification=VoIPModem Virtual Modem (Line1)
+; AutoAnswerRingCount=0
+;
+; [Modem.Line2]
+; ComPort=COM5
+; BaudRate=115200
+; Identification=VoIPModem Virtual Modem (Line2)
+; AutoAnswerRingCount=0

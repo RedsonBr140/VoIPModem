@@ -3,7 +3,7 @@
 #include <Windows.h>
 
 #include "ISerialPort.h"
-#include "../Logging/Logger.h"
+#include "../Logging/TaggedLogger.h"
 
 namespace voipmodem {
 
@@ -13,7 +13,7 @@ namespace voipmodem {
 // the same way.
 class WindowsSerialPort : public ISerialPort {
 public:
-    explicit WindowsSerialPort(Logger& logger);
+    explicit WindowsSerialPort(TaggedLogger& logger);
     ~WindowsSerialPort() override;
 
     bool Open(const std::string& portName, int baudRate) override;
@@ -25,7 +25,7 @@ public:
     bool Write(const std::vector<uint8_t>& data) override;
 
 private:
-    Logger& logger_;
+    TaggedLogger& logger_;
     HANDLE handle_ = INVALID_HANDLE_VALUE;
 };
 

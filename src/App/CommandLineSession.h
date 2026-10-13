@@ -5,7 +5,7 @@
 
 #include "../Lib/Core/ModemStateMachine.h"
 #include "../Lib/Serial/ISerialPort.h"
-#include "../Lib/Logging/Logger.h"
+#include "../Lib/Logging/TaggedLogger.h"
 
 namespace voipmodem {
 
@@ -16,7 +16,7 @@ namespace voipmodem {
 // real to carry.
 class CommandLineSession {
 public:
-    CommandLineSession(ISerialPort& port, ModemStateMachine& core, Logger& logger);
+    CommandLineSession(ISerialPort& port, ModemStateMachine& core, TaggedLogger& logger);
 
     // Feed one received byte. Call this from the serial read loop.
     void OnByteReceived(uint8_t byte);
@@ -28,7 +28,7 @@ private:
 
     ISerialPort& port_;
     ModemStateMachine& core_;
-    Logger& logger_;
+    TaggedLogger& logger_;
     std::string lineBuffer_;
 
     static constexpr size_t kMaxLineLength = 256;

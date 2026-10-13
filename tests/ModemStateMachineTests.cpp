@@ -3,18 +3,21 @@
 #include "../src/Lib/Core/ModemStateMachine.h"
 #include "../src/Lib/Hayes/AtCommandParser.h"
 #include "../src/Lib/Logging/Logger.h"
+#include "../src/Lib/Logging/TaggedLogger.h"
 
 using voipmodem::AtCommandParser;
 using voipmodem::CallOutcome;
 using voipmodem::Logger;
 using voipmodem::ModemStateMachine;
 using voipmodem::ResultCode;
+using voipmodem::TaggedLogger;
 using voipmodem::test::FakeCallController;
 
 TEST(BareAt_RespondsOk) {
     FakeCallController controller;
     Logger logger;
-    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     const auto outcome = core.Execute(AtCommandParser::Parse("AT"));
     EXPECT_TRUE(outcome.hasResult);
@@ -25,7 +28,8 @@ TEST(BareAt_RespondsOk) {
 TEST(InvalidCommand_RespondsError) {
     FakeCallController controller;
     Logger logger;
-    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     const auto outcome = core.Execute(AtCommandParser::Parse("ATX1"));
     EXPECT_TRUE(outcome.finalResult == ResultCode::Error);
@@ -34,7 +38,8 @@ TEST(InvalidCommand_RespondsError) {
 TEST(BlankLine_HasNoResult) {
     FakeCallController controller;
     Logger logger;
-    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     const auto outcome = core.Execute(AtCommandParser::Parse("   "));
     EXPECT_TRUE(!outcome.hasResult);
@@ -43,7 +48,8 @@ TEST(BlankLine_HasNoResult) {
 TEST(AtI_ReturnsIdentificationAsInfoLine) {
     FakeCallController controller;
     Logger logger;
-    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     const auto outcome = core.Execute(AtCommandParser::Parse("ATI"));
     EXPECT_EQ(outcome.infoLines.size(), static_cast<size_t>(1));
@@ -54,7 +60,8 @@ TEST(AtI_ReturnsIdentificationAsInfoLine) {
 TEST(AtQ1_SuppressesFinalResult) {
     FakeCallController controller;
     Logger logger;
-    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     core.Execute(AtCommandParser::Parse("ATQ1"));
     const auto outcome = core.Execute(AtCommandParser::Parse("AT"));
@@ -64,7 +71,8 @@ TEST(AtQ1_SuppressesFinalResult) {
 TEST(SetThenQueryRegister_RoundTrips) {
     FakeCallController controller;
     Logger logger;
-    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     core.Execute(AtCommandParser::Parse("ATS0=3"));
     const auto outcome = core.Execute(AtCommandParser::Parse("ATS0?"));
@@ -76,7 +84,8 @@ TEST(Dial_ReturnsControllerOutcomeAsResultCode) {
     FakeCallController controller;
     controller.dialOutcome = CallOutcome::Busy;
     Logger logger;
-    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     const auto outcome = core.Execute(AtCommandParser::Parse("ATD5551234"));
     EXPECT_EQ(controller.lastDialedNumber, std::string("5551234"));
@@ -88,7 +97,8 @@ TEST(DialWithToneModifier_DialsTheNumberNotTheLetterT) {
     // just "T" — Windows modem drivers send ATDT by default.
     FakeCallController controller;
     Logger logger;
-    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     core.Execute(AtCommandParser::Parse("ATDT5551234"));
     EXPECT_EQ(controller.lastDialedNumber, std::string("5551234"));
@@ -97,7 +107,8 @@ TEST(DialWithToneModifier_DialsTheNumberNotTheLetterT) {
 TEST(DialWithPulseModifier_DialsTheNumberNotTheLetterP) {
     FakeCallController controller;
     Logger logger;
-    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     core.Execute(AtCommandParser::Parse("ATDP5551234"));
     EXPECT_EQ(controller.lastDialedNumber, std::string("5551234"));
@@ -107,7 +118,8 @@ TEST(Answer_ReturnsControllerOutcomeAsResultCode) {
     FakeCallController controller;
     controller.answerOutcome = CallOutcome::NoAnswer;
     Logger logger;
-    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     const auto outcome = core.Execute(AtCommandParser::Parse("ATA"));
     EXPECT_TRUE(outcome.finalResult == ResultCode::NoAnswer);
@@ -116,7 +128,8 @@ TEST(Answer_ReturnsControllerOutcomeAsResultCode) {
 TEST(HangUp_InvokesController) {
     FakeCallController controller;
     Logger logger;
-    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     core.Execute(AtCommandParser::Parse("ATH"));
     EXPECT_EQ(controller.hangUpCount, 1);
@@ -125,7 +138,8 @@ TEST(HangUp_InvokesController) {
 TEST(AmpersandF_RestoresDefaultsAfterChanges) {
     FakeCallController controller;
     Logger logger;
-    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
     core.Execute(AtCommandParser::Parse("ATE0V0Q1"));
     core.Execute(AtCommandParser::Parse("AT&F"));

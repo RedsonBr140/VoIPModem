@@ -68,10 +68,12 @@
   <ItemGroup>
     <ClInclude Include="Application.h" />
     <ClInclude Include="CommandLineSession.h" />
+    <ClInclude Include="ModemInstance.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Application.cpp" />
     <ClCompile Include="CommandLineSession.cpp" />
+    <ClCompile Include="ModemInstance.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>

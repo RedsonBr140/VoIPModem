@@ -12,7 +12,7 @@ std::string ToDevicePath(const std::string& portName) {
 
 } // namespace
 
-WindowsSerialPort::WindowsSerialPort(Logger& logger) : logger_(logger) {}
+WindowsSerialPort::WindowsSerialPort(TaggedLogger& logger) : logger_(logger) {}
 
 WindowsSerialPort::~WindowsSerialPort() {
     Close();

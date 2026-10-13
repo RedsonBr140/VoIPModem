@@ -20,7 +20,7 @@ std::string FrameTextLine(const std::string& text) {
 }
 } // namespace
 
-CommandLineSession::CommandLineSession(ISerialPort& port, ModemStateMachine& core, Logger& logger)
+CommandLineSession::CommandLineSession(ISerialPort& port, ModemStateMachine& core, TaggedLogger& logger)
     : port_(port), core_(core), logger_(logger) {}
 
 void CommandLineSession::Echo(uint8_t byte) {
