@@ -1,0 +1,13 @@
+.vs/
+x64/
+x86/
+Debug/
+Release/
+*.obj
+*.ilk
+*.pdb
+*.exe
+*.log
+out/
+
+voipmodem.ini

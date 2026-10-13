@@ -1,0 +1,29 @@
+; VoIPModem configuration — Phase 1 (serial/Hayes skeleton) subset only.
+; Copy this file to voipmodem.ini next to the executable (or pass a path
+; as the first command-line argument) and adjust as needed.
+;
+; SIP/RTP/DSP settings described in docs/PROJECT_SPEC.md section 5 are not
+; yet read by any code and are intentionally omitted here; they will be
+; added alongside the Phase 2+ modules that consume them.
+
+[Modem]
+; Virtual COM port created by com0com (see docs/PROJECT_SPEC.md section 3).
+ComPort=COM3
+
+; Local DTE-to-modem serial speed. This is NOT the negotiated modem-to-modem
+; connection speed, which has no meaning yet since there is no DSP/modulation
+; backend (Phase 4).
+BaudRate=115200
+
+; Text returned by ATI.
+Identification=VoIPModem Virtual Modem (Phase 1)
+
+; S0 register initial value (auto-answer ring count). Stored and queryable
+; via ATS0=/ATS0?, but nothing currently triggers auto-answer on a RING
+; event, since there is no SIP layer to produce one.
+AutoAnswerRingCount=0
+
+[Logging]
+; One of: Error, Warn, Info, Debug
+Level=Info
+File=voipmodem.log
