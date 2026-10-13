@@ -64,7 +64,38 @@ TEST(AtD_CapturesDialStringToEndOfLine) {
     EXPECT_TRUE(result.isValid);
     EXPECT_EQ(result.commands.size(), static_cast<size_t>(1));
     EXPECT_TRUE(result.commands[0].type == AtCommandType::Dial);
+    EXPECT_TRUE(result.commands[0].dialMode == voipmodem::AtDialMode::Default);
     EXPECT_EQ(result.commands[0].stringParam, std::string("5551234"));
+}
+
+TEST(AtDT_StripsToneModifierFromDialString) {
+    const auto result = AtCommandParser::Parse("ATDT5551234");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::Dial);
+    EXPECT_TRUE(result.commands[0].dialMode == voipmodem::AtDialMode::Tone);
+    EXPECT_EQ(result.commands[0].stringParam, std::string("5551234"));
+}
+
+TEST(AtDP_StripsPulseModifierFromDialString) {
+    const auto result = AtCommandParser::Parse("ATDP5551234");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::Dial);
+    EXPECT_TRUE(result.commands[0].dialMode == voipmodem::AtDialMode::Pulse);
+    EXPECT_EQ(result.commands[0].stringParam, std::string("5551234"));
+}
+
+TEST(AtDT_Lowercase_StillStripsModifier) {
+    const auto result = AtCommandParser::Parse("atdt5551234");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].dialMode == voipmodem::AtDialMode::Tone);
+    EXPECT_EQ(result.commands[0].stringParam, std::string("5551234"));
+}
+
+TEST(AtDT_WithNoNumber_YieldsEmptyDialString) {
+    const auto result = AtCommandParser::Parse("ATDT");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].dialMode == voipmodem::AtDialMode::Tone);
+    EXPECT_EQ(result.commands[0].stringParam, std::string(""));
 }
 
 TEST(AtA_IsAnswer) {

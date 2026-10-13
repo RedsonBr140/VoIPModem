@@ -8,6 +8,7 @@ Release/
 *.pdb
 *.exe
 *.log
+*.vcxproj.user
 out/
 
 voipmodem.ini

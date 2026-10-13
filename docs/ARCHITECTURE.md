@@ -44,7 +44,7 @@ side, though nothing currently implements it besides `WindowsSerialPort`.
 ## What exists today (Phase 1)
 
 - **Hayes parser** (`AtCommandParser`): parses `AT`, `ATI`, `ATZ`, `ATE`,
-  `ATV`, `ATQ`, `ATS<n>=<v>`, `ATS<n>?`, `ATD`, `ATA`, `ATH`, `AT&F`,
+  `ATV`, `ATQ`, `ATS<n>=<v>`, `ATS<n>?`, `ATD`/`ATDT`/`ATDP`, `ATA`, `ATH`, `AT&F`,
   including chained commands (`ATE1V0Q0`). Anything else is rejected as
   invalid (-> `ERROR`), not silently ignored.
 - **Modem core** (`ModemStateMachine`): owns the ATE/ATV/ATQ profile and a
@@ -60,10 +60,18 @@ side, though nothing currently implements it besides `WindowsSerialPort`.
   there is a telephony backend. **There is no SIP/RTP integration.**
 - **Serial I/O** (`WindowsSerialPort`): opens a real or virtual (com0com)
   COM port via Win32, sets 8N1 with no flow control, and does blocking
-  byte-at-a-time reads with a timeout. Verified to open a real COM3 on
-  the development machine and enter the listen loop without crashing;
-  not yet verified against a com0com virtual pair or an actual terminal
-  emulator typing AT commands end-to-end.
+  byte-at-a-time reads with a timeout. Manually verified end-to-end
+  against a com0com virtual pair and a terminal emulator: the full
+  command matrix in `docs/ROADMAP.md` (echo, verbose/numeric/quiet
+  modes, register round-trip, dial/answer/hangup, invalid commands)
+  passed.
+- **Dial string parsing**: `ATD` accepts an optional `T` (tone) or `P`
+  (pulse) modifier immediately after the `D`, matching what Windows
+  modem drivers actually send (`ATDT<number>` by default). The modifier
+  is stripped before the number reaches `ICallController::Dial()` — it
+  has no behavioral effect over SIP, but a modifier character leaking
+  into the dial string was an actual bug caught during manual testing
+  (`ATDT5551234` was dialing `"T5551234"` instead of `"5551234"`).
 - **Command-mode session** (`CommandLineSession`): buffers bytes into
   lines on CR, performs local echo when ATE is on, supports backspace/DEL
   editing, and frames responses. Response framing uses `\r\n<text>\r\n`

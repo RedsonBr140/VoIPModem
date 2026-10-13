@@ -53,7 +53,8 @@ AtParseResult AtCommandParser::Parse(const std::string& line) {
     const std::string body = trimmed.substr(2);
     if (body.empty()) {
         result.isValid = true;
-        result.commands.push_back(AtCommand{AtCommandType::Attention, std::nullopt, std::nullopt, ""});
+        result.commands.push_back(
+            AtCommand{AtCommandType::Attention, std::nullopt, std::nullopt, AtDialMode::Default, ""});
         return result;
     }
 
@@ -62,16 +63,30 @@ AtParseResult AtCommandParser::Parse(const std::string& line) {
         const char c = static_cast<char>(std::toupper(static_cast<unsigned char>(body[i])));
 
         if (c == 'D') {
+            size_t rest = i + 1;
+            AtDialMode mode = AtDialMode::Default;
+            if (rest < body.size()) {
+                const char modeChar = static_cast<char>(std::toupper(static_cast<unsigned char>(body[rest])));
+                if (modeChar == 'T') {
+                    mode = AtDialMode::Tone;
+                    ++rest;
+                } else if (modeChar == 'P') {
+                    mode = AtDialMode::Pulse;
+                    ++rest;
+                }
+            }
             AtCommand cmd;
             cmd.type = AtCommandType::Dial;
-            cmd.stringParam = body.substr(i + 1);
+            cmd.dialMode = mode;
+            cmd.stringParam = body.substr(rest);
             result.commands.push_back(cmd);
             i = body.size();
             break;
         }
 
         if (c == 'A') {
-            result.commands.push_back(AtCommand{AtCommandType::Answer, std::nullopt, std::nullopt, ""});
+            result.commands.push_back(
+                AtCommand{AtCommandType::Answer, std::nullopt, std::nullopt, AtDialMode::Default, ""});
             ++i;
             continue;
         }

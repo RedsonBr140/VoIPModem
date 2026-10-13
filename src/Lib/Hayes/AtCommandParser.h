@@ -8,7 +8,8 @@ namespace voipmodem {
 
 // Parses a single command-mode input line into a sequence of AtCommand
 // values. Supports the subset required by docs/PROJECT_SPEC.md section 3:
-// AT, ATI, ATZ, ATE, ATV, ATQ, ATS<n>=<v>, ATS<n>?, ATD, ATA, ATH, AT&F.
+// AT, ATI, ATZ, ATE, ATV, ATQ, ATS<n>=<v>, ATS<n>?, ATD (optionally
+// followed by a T or P dial-mode modifier, e.g. ATDT/ATDP), ATA, ATH, AT&F.
 //
 // Commands may be chained after a single "AT" prefix (e.g. "ATE1V0Q0"),
 // except ATD, which consumes the remainder of the line as the dial string

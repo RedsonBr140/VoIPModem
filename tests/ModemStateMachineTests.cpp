@@ -83,6 +83,26 @@ TEST(Dial_ReturnsControllerOutcomeAsResultCode) {
     EXPECT_TRUE(outcome.finalResult == ResultCode::Busy);
 }
 
+TEST(DialWithToneModifier_DialsTheNumberNotTheLetterT) {
+    // Regression test: ATDT5551234 must dial "5551234", not "T5551234" or
+    // just "T" — Windows modem drivers send ATDT by default.
+    FakeCallController controller;
+    Logger logger;
+    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+
+    core.Execute(AtCommandParser::Parse("ATDT5551234"));
+    EXPECT_EQ(controller.lastDialedNumber, std::string("5551234"));
+}
+
+TEST(DialWithPulseModifier_DialsTheNumberNotTheLetterP) {
+    FakeCallController controller;
+    Logger logger;
+    ModemStateMachine core(controller, logger, "VoIPModem Test Modem");
+
+    core.Execute(AtCommandParser::Parse("ATDP5551234"));
+    EXPECT_EQ(controller.lastDialedNumber, std::string("5551234"));
+}
+
 TEST(Answer_ReturnsControllerOutcomeAsResultCode) {
     FakeCallController controller;
     controller.answerOutcome = CallOutcome::NoAnswer;

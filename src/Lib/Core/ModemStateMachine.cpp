@@ -88,6 +88,9 @@ ExecutionOutcome ModemStateMachine::Execute(const AtParseResult& parsed) {
 
             case AtCommandType::Dial: {
                 state_ = ModemState::Dialing;
+                logger_.Info("ATD" + std::string(cmd.dialMode == AtDialMode::Tone ? "T" :
+                                                   cmd.dialMode == AtDialMode::Pulse ? "P" : "") +
+                             " dialing '" + cmd.stringParam + "'");
                 const CallOutcome result = callController_.Dial(cmd.stringParam);
                 state_ = ModemState::CommandMode; // no backend yet connects/stays online
                 outcome.finalResult = ToResultCode(result);
@@ -96,6 +99,7 @@ ExecutionOutcome ModemStateMachine::Execute(const AtParseResult& parsed) {
 
             case AtCommandType::Answer: {
                 state_ = ModemState::Answering;
+                logger_.Info("ATA answering incoming call");
                 const CallOutcome result = callController_.Answer();
                 state_ = ModemState::CommandMode;
                 outcome.finalResult = ToResultCode(result);
@@ -103,6 +107,7 @@ ExecutionOutcome ModemStateMachine::Execute(const AtParseResult& parsed) {
             }
 
             case AtCommandType::HangUp:
+                logger_.Info("ATH hanging up");
                 callController_.HangUp();
                 state_ = ModemState::CommandMode;
                 break;

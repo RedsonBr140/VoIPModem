@@ -15,18 +15,31 @@ enum class AtCommandType {
     SetQuiet,         // ATQn
     SetRegister,      // ATSn=v
     QueryRegister,    // ATSn?
-    Dial,             // ATDxxxx
+    Dial,             // ATDxxxx / ATDTxxxx / ATDPxxxx
     Answer,           // ATA
     HangUp,           // ATHn
     FactoryDefaults,  // AT&Fn
     Unknown
 };
 
+// The T/P immediately after D selects tone vs. pulse dialing on a real
+// POTS line. There is no physical line here — calls go out over SIP
+// regardless — but the character must still be recognized and stripped
+// from the dial string rather than being dialed as a literal digit. Most
+// Windows modem drivers send ATDT by default, so this is required for
+// interoperability with Windows RAS, not just a cosmetic nicety.
+enum class AtDialMode {
+    Default, // bare ATD, no T/P given
+    Tone,    // ATDT
+    Pulse    // ATDP
+};
+
 struct AtCommand {
     AtCommandType type = AtCommandType::Unknown;
     std::optional<int> numericParam;  // E/V/Q/Z/H/&F parameter, or SetRegister value
     std::optional<int> registerIndex; // S-register index for SetRegister/QueryRegister
-    std::string stringParam;          // dial string for Dial
+    AtDialMode dialMode = AtDialMode::Default; // meaningful only for Dial
+    std::string stringParam;          // dial string for Dial, with any T/P modifier removed
 };
 
 // Result of parsing one command line. A syntactically invalid line
