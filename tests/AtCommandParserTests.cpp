@@ -3,6 +3,7 @@
 
 using voipmodem::AtCommandParser;
 using voipmodem::AtCommandType;
+using voipmodem::AtExtendedSuffix;
 
 TEST(BareAt_IsAttentionOnly) {
     const auto result = AtCommandParser::Parse("AT");
@@ -134,6 +135,50 @@ TEST(AmpersandF_IsFactoryDefaults) {
     const auto result = AtCommandParser::Parse("AT&F");
     EXPECT_TRUE(result.isValid);
     EXPECT_TRUE(result.commands[0].type == AtCommandType::FactoryDefaults);
+}
+
+TEST(ExtendedCommand_TestSuffix_ParsesNameAndSuffix) {
+    const auto result = AtCommandParser::Parse("AT+FCLASS=?");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_EQ(result.commands.size(), static_cast<size_t>(1));
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::ExtendedCommand);
+    EXPECT_EQ(result.commands[0].extendedPrefix, '+');
+    EXPECT_EQ(result.commands[0].extendedName, std::string("FCLASS"));
+    EXPECT_TRUE(result.commands[0].extendedSuffix == AtExtendedSuffix::Test);
+}
+
+TEST(ExtendedCommand_QuerySuffix_Parses) {
+    const auto result = AtCommandParser::Parse("AT+GCI?");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_EQ(result.commands[0].extendedName, std::string("GCI"));
+    EXPECT_TRUE(result.commands[0].extendedSuffix == AtExtendedSuffix::Query);
+}
+
+TEST(ExtendedCommand_SetValueSuffix_CapturesValue) {
+    const auto result = AtCommandParser::Parse("AT+FCLASS=0");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].extendedSuffix == AtExtendedSuffix::SetValue);
+    EXPECT_EQ(result.commands[0].extendedValue, std::string("0"));
+}
+
+TEST(ExtendedCommand_NoSuffix_IsBareAction) {
+    const auto result = AtCommandParser::Parse("AT+GMM");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_EQ(result.commands[0].extendedName, std::string("GMM"));
+    EXPECT_TRUE(result.commands[0].extendedSuffix == AtExtendedSuffix::None);
+}
+
+TEST(ExtendedCommand_PoundPrefix_Parses) {
+    const auto result = AtCommandParser::Parse("AT#CLS=?");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_EQ(result.commands[0].extendedPrefix, '#');
+    EXPECT_EQ(result.commands[0].extendedName, std::string("CLS"));
+    EXPECT_TRUE(result.commands[0].extendedSuffix == AtExtendedSuffix::Test);
+}
+
+TEST(ExtendedCommand_NoNameAfterPrefix_IsInvalid) {
+    const auto result = AtCommandParser::Parse("AT+");
+    EXPECT_TRUE(!result.isValid);
 }
 
 TEST(AmpersandUnknownLetter_IsInvalid) {

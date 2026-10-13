@@ -19,7 +19,18 @@ enum class AtCommandType {
     Answer,           // ATA
     HangUp,           // ATHn
     FactoryDefaults,  // AT&Fn
+    ExtendedCommand,  // AT+<name>[=?|?|=<value>] or AT#<name>[...] (V.25ter / vendor extensions)
     Unknown
+};
+
+// How an ExtendedCommand was suffixed: "=?" asks what values/behavior are
+// supported (Test), "?" asks the current value (Query/Read), "=<value>"
+// sets one (SetValue), and no suffix at all is a bare action command.
+enum class AtExtendedSuffix {
+    None,
+    Test,     // +NAME=?
+    Query,    // +NAME?
+    SetValue  // +NAME=<value>
 };
 
 // The T/P immediately after D selects tone vs. pulse dialing on a real
@@ -40,6 +51,10 @@ struct AtCommand {
     std::optional<int> registerIndex; // S-register index for SetRegister/QueryRegister
     AtDialMode dialMode = AtDialMode::Default; // meaningful only for Dial
     std::string stringParam;          // dial string for Dial, with any T/P modifier removed
+    char extendedPrefix = '+';                        // '+' or '#'; meaningful only for ExtendedCommand
+    std::string extendedName;                         // e.g. "FCLASS", "GMM"; always uppercased
+    AtExtendedSuffix extendedSuffix = AtExtendedSuffix::None; // meaningful only for ExtendedCommand
+    std::string extendedValue;                         // the <value> in "+NAME=<value>"
 };
 
 // Result of parsing one command line. A syntactically invalid line

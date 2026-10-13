@@ -44,9 +44,24 @@ Done:
   default, so it would have broken RAS dial-out before Phase 5 even
   started. See `docs/ARCHITECTURE.md` "Dial string parsing".
 
-Known non-issue, not a Phase 1 gap: a bare com0com COM port is not
-automatically recognized by Windows as a "modem" — that's expected, and
-is addressed under Phase 5 below, not here.
+- Fixed a second real gap found via a real Windows "Standard Modem"
+  driver's diagnostics (see below): `AT+FCLASS=?`, `AT+GMM`, `AT#CLS=?`,
+  `AT+GCI?` all failed outright because the parser didn't understand
+  `+`/`#` extended commands at all. Added general extended-command
+  parsing and honest answers for `+FCLASS`/`+GMI`/`+GMM`/`+GMR`; `+GCI`
+  and `#CLS` correctly still return `ERROR` since neither is modeled.
+  Verified at the wire level against the real running app (see
+  `docs/ARCHITECTURE.md` "V.25ter extended commands").
+- **Windows now recognizes a com0com port as an actual modem device**:
+  installed via Device Manager's "Add legacy hardware" wizard using the
+  generic "(Standard Modem Types)" driver, bound to the COM port on the
+  *opposite* side of the com0com pair from the one VoIPModem itself
+  opens — e.g. VoIPModem's `[Modem.Line1]` listens on COM3, so the
+  Windows modem driver goes on COM4 (confirmed pairing via `com0com`'s
+  own `setupc.exe list`, since the two sides aren't always adjacent COM
+  numbers: this machine's pairs are COM3↔COM4 and COM5↔COM6). Getting
+  this backwards (driver on the same port VoIPModem has open) doesn't
+  work — that port is already held open by VoIPModem.
 
 ## Phase 2 — SIP call control — **not started**
 
@@ -63,16 +78,13 @@ No DSP/modulation code exists anywhere in the repository.
 
 ## Phase 5 — Windows networking (RAS/PPP) — **not started**
 
-Prerequisite not yet done, and not a code change: Windows RAS dials
-through a *modem device*, not a bare COM port. A com0com virtual port
-has to be bound to a generic Hayes-compatible modem driver before RAS
-can use it — e.g. Device Manager → Add Legacy Hardware → Modem →
-"Standard Modem Types" → a generic Hayes-compatible entry (or
-"Communications cable between two computers"), attached to the
-com0com port VoIPModem listens on. The AT command set implemented in
-Phase 1 is exactly what that generic driver expects to speak, so no
-VoIPModem code is implicated — this is deployment/configuration to do
-once Phase 5 actually starts RAS integration work.
+One prerequisite is done early: Windows RAS dials through a *modem
+device*, not a bare COM port, so at least one com0com port pair now has
+a real "(Standard Modem Types)" driver bound to it (see Phase 1's
+"Windows now recognizes..." entry above for exactly which port and why).
+RAS integration itself — authentication, address assignment, routing,
+DNS, and an actual dial-up networking session from the Windows 98
+client — has not been started.
 
 ## Phase 6 — Compatibility and optimization — **not started**
 

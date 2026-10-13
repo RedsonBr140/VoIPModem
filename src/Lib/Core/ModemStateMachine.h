@@ -41,6 +41,7 @@ public:
 
 private:
     static ResultCode ToResultCode(CallOutcome outcome);
+    ExecutionOutcome ExecuteExtendedCommand(const AtCommand& cmd) const;
 
     ICallController& callController_;
     TaggedLogger& logger_;

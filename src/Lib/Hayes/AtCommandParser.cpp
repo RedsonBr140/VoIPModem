@@ -15,6 +15,15 @@ std::string Trim(const std::string& s) {
     return s.substr(begin, end - begin + 1);
 }
 
+std::string ToUpperCopy(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        out.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    }
+    return out;
+}
+
 bool TryParseDigits(const std::string& body, size_t& i, int& outValue) {
     const size_t start = i;
     while (i < body.size() && std::isdigit(static_cast<unsigned char>(body[i]))) {
@@ -125,6 +134,46 @@ AtParseResult AtCommandParser::Parse(const std::string& line) {
 
             result.isValid = false; // "Sn" with no "=" or "?" is malformed
             return result;
+        }
+
+        if (c == '+' || c == '#') {
+            // V.25ter extended commands ("+FCLASS", "+GMM", ...) and vendor
+            // extensions ("#CLS", ...). Windows' generic modem driver probes
+            // these during "Query Modem" diagnostics and RAS setup. Consumes
+            // the rest of the line, like ATD — real devices don't chain
+            // another command after one of these either.
+            const char prefixChar = c;
+            size_t nameStart = i + 1;
+            size_t j = nameStart;
+            while (j < body.size() && std::isalpha(static_cast<unsigned char>(body[j]))) {
+                ++j;
+            }
+            if (j == nameStart) {
+                result.isValid = false; // "+" or "#" with no command name
+                return result;
+            }
+            const std::string name = ToUpperCopy(body.substr(nameStart, j - nameStart));
+
+            AtExtendedSuffix suffix = AtExtendedSuffix::None;
+            std::string value;
+            if (j + 1 < body.size() && body[j] == '=' && body[j + 1] == '?') {
+                suffix = AtExtendedSuffix::Test;
+            } else if (j < body.size() && body[j] == '?') {
+                suffix = AtExtendedSuffix::Query;
+            } else if (j < body.size() && body[j] == '=') {
+                suffix = AtExtendedSuffix::SetValue;
+                value = body.substr(j + 1);
+            }
+
+            AtCommand cmd;
+            cmd.type = AtCommandType::ExtendedCommand;
+            cmd.extendedPrefix = prefixChar;
+            cmd.extendedName = name;
+            cmd.extendedSuffix = suffix;
+            cmd.extendedValue = value;
+            result.commands.push_back(cmd);
+            i = body.size();
+            break;
         }
 
         if (c == '&') {

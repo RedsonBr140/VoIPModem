@@ -148,3 +148,64 @@ TEST(AmpersandF_RestoresDefaultsAfterChanges) {
     EXPECT_TRUE(core.Profile().verboseResultCodes);
     EXPECT_TRUE(!core.Profile().quietMode);
 }
+
+TEST(FClassTest_ReportsDataOnlySupport) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.Execute(AtCommandParser::Parse("AT+FCLASS=?"));
+    EXPECT_EQ(outcome.infoLines.size(), static_cast<size_t>(1));
+    EXPECT_EQ(outcome.infoLines[0], std::string("0"));
+    EXPECT_TRUE(outcome.finalResult == ResultCode::OK);
+}
+
+TEST(FClassSetToZero_Succeeds) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.Execute(AtCommandParser::Parse("AT+FCLASS=0"));
+    EXPECT_TRUE(outcome.finalResult == ResultCode::OK);
+}
+
+TEST(FClassSetToNonZero_FailsHonestly) {
+    // We don't support fax/voice classes - this must not silently succeed.
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.Execute(AtCommandParser::Parse("AT+FCLASS=1"));
+    EXPECT_TRUE(outcome.finalResult == ResultCode::Error);
+}
+
+TEST(GMM_ReturnsIdentificationString) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.Execute(AtCommandParser::Parse("AT+GMM"));
+    EXPECT_EQ(outcome.infoLines.size(), static_cast<size_t>(1));
+    EXPECT_EQ(outcome.infoLines[0], std::string("VoIPModem Test Modem"));
+    EXPECT_TRUE(outcome.finalResult == ResultCode::OK);
+}
+
+TEST(UnsupportedExtendedCommand_HonestlyReturnsError) {
+    // +GCI (country of installation) and #CLS (vendor voice/fax class) are
+    // real things some modems answer, but we don't model either - make sure
+    // we say so rather than guessing a plausible-looking value.
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto gci = core.Execute(AtCommandParser::Parse("AT+GCI?"));
+    EXPECT_TRUE(gci.finalResult == ResultCode::Error);
+
+    const auto cls = core.Execute(AtCommandParser::Parse("AT#CLS=?"));
+    EXPECT_TRUE(cls.finalResult == ResultCode::Error);
+}

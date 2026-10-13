@@ -112,6 +112,9 @@ ExecutionOutcome ModemStateMachine::Execute(const AtParseResult& parsed) {
                 state_ = ModemState::CommandMode;
                 break;
 
+            case AtCommandType::ExtendedCommand:
+                return ExecuteExtendedCommand(cmd); // always the last command in its line
+
             case AtCommandType::Unknown:
             default:
                 outcome.finalResult = ResultCode::Error;
@@ -120,6 +123,60 @@ ExecutionOutcome ModemStateMachine::Execute(const AtParseResult& parsed) {
     }
 
     outcome.finalResult = ResultCode::OK;
+    return outcome;
+}
+
+ExecutionOutcome ModemStateMachine::ExecuteExtendedCommand(const AtCommand& cmd) const {
+    ExecutionOutcome outcome;
+    outcome.suppressFinalResult = profile_.quietMode;
+
+    const std::string key = std::string(1, cmd.extendedPrefix) + cmd.extendedName;
+
+    // Only commands we have a real, true answer for. Everything else
+    // (+GCI country-of-installation, #CLS vendor voice/fax class, ...)
+    // honestly returns ERROR rather than guessing a plausible-looking
+    // value — see docs/ARCHITECTURE.md "V.25ter extended commands".
+    if (key == "+FCLASS") {
+        // We are a plain data modem: no fax (class 1/2) or voice support.
+        switch (cmd.extendedSuffix) {
+            case AtExtendedSuffix::Test:
+                outcome.infoLines.push_back("0");
+                break;
+            case AtExtendedSuffix::Query:
+                outcome.infoLines.push_back("0");
+                break;
+            case AtExtendedSuffix::SetValue:
+                if (cmd.extendedValue != "0") {
+                    outcome.finalResult = ResultCode::Error; // asked for a class we don't support
+                    return outcome;
+                }
+                break;
+            case AtExtendedSuffix::None:
+                break;
+        }
+        outcome.finalResult = ResultCode::OK;
+        return outcome;
+    }
+
+    if (key == "+GMI") {
+        outcome.infoLines.push_back("VoIPModem Project");
+        outcome.finalResult = ResultCode::OK;
+        return outcome;
+    }
+
+    if (key == "+GMM") {
+        outcome.infoLines.push_back(identification_);
+        outcome.finalResult = ResultCode::OK;
+        return outcome;
+    }
+
+    if (key == "+GMR") {
+        outcome.infoLines.push_back("Phase 1");
+        outcome.finalResult = ResultCode::OK;
+        return outcome;
+    }
+
+    outcome.finalResult = ResultCode::Error;
     return outcome;
 }
 

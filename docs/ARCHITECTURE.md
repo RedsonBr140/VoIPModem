@@ -89,8 +89,10 @@ N > 1 by an actual Ctrl+C rather than a forced process kill).
 
 - **Hayes parser** (`AtCommandParser`): parses `AT`, `ATI`, `ATZ`, `ATE`,
   `ATV`, `ATQ`, `ATS<n>=<v>`, `ATS<n>?`, `ATD`/`ATDT`/`ATDP`, `ATA`, `ATH`, `AT&F`,
-  including chained commands (`ATE1V0Q0`). Anything else is rejected as
-  invalid (-> `ERROR`), not silently ignored.
+  and `+NAME`/`#NAME` extended commands (with `=?`/`?`/`=<value>` suffixes —
+  see "V.25ter extended commands" below), including chained commands
+  (`ATE1V0Q0`). Anything else is rejected as invalid (-> `ERROR`), not
+  silently ignored.
 - **Modem core** (`ModemStateMachine`): owns the ATE/ATV/ATQ profile and a
   10-register S-register bank, executes parsed commands, and tracks
   `ModemState` (CommandMode / Dialing / Answering / Negotiating /
@@ -119,6 +121,30 @@ N > 1 by an actual Ctrl+C rather than a forced process kill).
   has no behavioral effect over SIP, but a modifier character leaking
   into the dial string was an actual bug caught during manual testing
   (`ATDT5551234` was dialing `"T5551234"` instead of `"5551234"`).
+- **V.25ter extended commands**: a real Windows "Standard Modem Types"
+  driver was installed against a com0com port (see "Windows modem driver
+  installation" below) and its "Query Modem" diagnostic sent
+  `AT+FCLASS=?`, `AT+GMM`, `AT#CLS=?`, `AT+GCI?`/`AT+GCI=?` — none of
+  which the parser understood at all (`+`/`#` were unrecognized
+  characters, so the whole line failed). `AtCommandParser` now parses
+  the general `+NAME`/`#NAME[=?|?|=<value>]` grammar, and
+  `ModemStateMachine::ExecuteExtendedCommand` answers only the ones we
+  have a true answer for: `+FCLASS=?`/`+FCLASS?` -> `0` (we are a
+  plain data modem — no fax/voice class support — which is true, not
+  aspirational), `+FCLASS=0` -> `OK` (any other class -> honestly
+  `ERROR`), `+GMI`/`+GMM`/`+GMR` -> manufacturer/model/revision strings.
+  `+GCI` (country of installation) and `#CLS` (vendor-specific
+  voice/fax/data class) are **not** modeled and correctly return `ERROR`
+  — there is no physical-PSTN country concept in a SIP-backed virtual
+  modem, and `#CLS` is a specific chipset vendor extension we have no
+  reason to claim. Verified at the wire level: started `VoIPModem.exe`
+  on COM5, sent this exact command sequence from a raw serial client on
+  the paired COM6, and confirmed the real byte-for-byte responses match
+  (`+FCLASS=?`/`+GMM` return real answers; `#CLS=?`/`+GCI?` return
+  `ERROR`; the basic commands Windows also diagnosed, like `ATE0Q0V1`
+  and `ATI1`/`ATI7`, were already answering correctly before this fix —
+  the earlier "COMMAND NOT SUPPORTED" report covered the whole
+  diagnostic batch, not a framing bug in the basic commands).
 - **Command-mode session** (`CommandLineSession`): buffers bytes into
   lines on CR, performs local echo when ATE is on, supports backspace/DEL
   editing, and frames responses. Response framing uses `\r\n<text>\r\n`
