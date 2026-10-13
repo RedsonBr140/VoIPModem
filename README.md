@@ -5,13 +5,17 @@ modem and transports modem calls over SIP/VoIP. See
 `docs/PROJECT_SPEC.md` for the full specification, `docs/ARCHITECTURE.md`
 for what is actually implemented, and `docs/ROADMAP.md` for phase status.
 
-**Current status: Phase 1 (serial/Hayes command skeleton) complete;
-Phase 2 (SIP call control) mostly verified** — outgoing calls and SIP
-registration are confirmed against a real Asterisk server, but the
-incoming-call path (RING/ATA/auto-answer) is unit-tested only so far, not
-yet verified against a real incoming call. There is no RTP/audio or
-modem DSP implementation yet (Phases 3/4) — a connected call has
-signaling only, no media.
+**Current status: Phase 1 (serial/Hayes skeleton) and Phase 2 (SIP call
+control) complete and verified live** against a real Asterisk server —
+registration, outgoing and incoming calls, RING, `ATA`, and S0
+auto-answer all confirmed working, including two simultaneously
+registered extensions both reaching `CONNECT`. **Phase 3 (RTP audio) is
+implemented but not yet live-tested** — G.711-only codec negotiation and
+modem-tone-preserving media settings (no VAD/echo cancellation, native
+8kHz) are in place, and each call's audio connects to this machine's
+sound device, but no call has actually gone active against this code
+yet. There is no modem DSP implementation yet (Phase 4) — Phase 3 proves
+audio *transport* is clean, not that a real modem handshake survives it.
 
 ## Build
 

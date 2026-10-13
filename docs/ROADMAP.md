@@ -63,7 +63,7 @@ Done:
   this backwards (driver on the same port VoIPModem has open) doesn't
   work — that port is already held open by VoIPModem.
 
-## Phase 2 — SIP call control — **mostly verified; incoming calls untested**
+## Phase 2 — SIP call control — **complete, fully verified**
 
 Spec acceptance criterion: *incoming and outgoing SIP calls work
 reliably, with correct serial responses.*
@@ -92,26 +92,61 @@ Done:
   mock, not just a unit test.
 
 Then live-tested by the user against a real incoming call: **RING and
-`ATA` both confirmed working.** Auto-answer did not — root cause was a
-real bug, not just an untested path: `ModemInstanceConfig::autoAnswerRingCount`
-(`AutoAnswerRingCount=` in the INI) was parsed but never actually written
-into the S0 register, so it silently did nothing unless `ATS0=n` was
-typed manually first. Fixed via `ModemStateMachine::InitializeAutoAnswerRegister()`,
-called once from `ModemInstance`'s constructor. Covered by a regression
-test (`InitializeAutoAnswerRegister_SeedsS0FromConfig`); **re-verify
-against a real incoming call** before considering auto-answer done — the
-RING/ATA path was already proven live, but this specific fix hasn't been.
+`ATA` both confirmed working.** Auto-answer initially did not — root
+cause was a real bug, not just an untested path:
+`ModemInstanceConfig::autoAnswerRingCount` (`AutoAnswerRingCount=` in the
+INI) was parsed but never actually written into the S0 register, so it
+silently did nothing unless `ATS0=n` was typed manually first. Fixed via
+`ModemStateMachine::InitializeAutoAnswerRegister()`, called once from
+`ModemInstance`'s constructor, with a regression test
+(`InitializeAutoAnswerRegister_SeedsS0FromConfig`).
 
-Not yet verified:
-- A real successful outgoing call reaching `CONNECT` (only an
-  unroutable-number failure path was exercised live).
-- Graceful Ctrl+C shutdown with a `PjsipCallController`/`PjsipEndpoint`
-  actually torn down (only forced-process-kill has been exercised with
-  SIP active).
-- Multiple SIP-backed instances registering concurrently (only one
-  instance had real SIP credentials to test with this session).
+**Re-tested live after the fix**: auto-answer confirmed working, and a
+second instance was registered (extension 1004, same password, same
+Asterisk server) — both instances reached `CONNECT` on real calls
+simultaneously. Phase 2's acceptance criterion ("incoming and outgoing
+SIP calls work reliably, with correct serial responses") is met.
 
-## Phase 3 — RTP audio — **not started**
+Still not verified, but not blocking (pre-existing gaps, not Phase-2
+regressions): graceful Ctrl+C shutdown with a
+`PjsipCallController`/`PjsipEndpoint` actually torn down (only
+forced-process-kill has been exercised with SIP active).
+
+## Phase 3 — RTP audio — **implemented, awaiting live audio test**
+
+Spec acceptance criterion: *bidirectional modem-like audio can pass
+through the VoIP path without the application corrupting it.*
+
+Done:
+- Media config tuned for modem-tone preservation per
+  `docs/PROJECT_SPEC.md` section 4.D: native 8kHz clock rate (no
+  resampling), VAD/silence-suppression disabled, echo cancellation
+  disabled. See `docs/ARCHITECTURE.md` "RTP audio (Phase 3)" for exactly
+  which `MediaConfig` fields and why — and the one gap, that pjsua2
+  exposes no explicit AGC toggle to disable.
+- Codec negotiation restricted process-wide to G.711 (PCMU/PCMA) only;
+  every other codec (Opus, Speex, GSM, iLBC, ...) is disabled outright,
+  not just de-prioritized, per section 4.E.
+- Each call's active audio media is connected to this machine's default
+  sound device on `onCallMediaState`, as the Phase 3 testable deliverable
+  (chosen over a stubbed DSP-facing port after discussing the tradeoff
+  with the user) — a real, byear-verifiable proof that G.711
+  negotiation/RTP transport/codec fidelity are correct, without blocking
+  Phase 4, which just takes over the same connection point.
+- Smoke-tested: both instances start, register, and open without any
+  codec/media errors logged. **The sound-device connection itself has
+  not actually run yet** — it only fires once a call's media goes
+  active, and no call has gone active against this code yet.
+
+Not yet verified — this is the actual Phase 3 acceptance test:
+- A real call (planned: a physical analog line through the Cisco FXS
+  gateway and Asterisk, dialing into extension 1003 and/or 1004)
+  reaching active media and producing genuinely audible, bidirectional
+  audio with no corruption.
+- Even once that passes, it only proves human voice sounds right over
+  the path — not that an actual modem handshake tone would survive
+  undistorted. That distinction is Phase 4's to prove, once a DSP engine
+  exists that can tell "sounds fine" from "decodes correctly" apart.
 
 ## Phase 4 — Actual modem interoperability — **not started**
 
@@ -133,6 +168,9 @@ client — has not been started.
 
 ## Recommended next step
 
-RING and `ATA` are confirmed live; re-verify auto-answer specifically
-(now that the S0-from-config bug is fixed) and a successful outgoing
-`CONNECT`, then Phase 2 is done and Phase 3 (RTP audio) can start.
+Phase 2 is done. Run the real Phase 3 acceptance test: dial a physical
+analog line into extension 1003 (and/or 1004) and confirm audio is
+actually audible and clean both directions. Update this file and
+`docs/ARCHITECTURE.md` "RTP audio (Phase 3)" with the real result
+immediately after — don't leave the "not yet verified" language in
+place once it's been tested.

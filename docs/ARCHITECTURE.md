@@ -195,17 +195,87 @@ registration succeeded (`SIP registration result: 200 OK`) for a real
 extension, and `ATD` to an unroutable number dialed through the real
 SIP stack and correctly produced `NO CARRIER` on the actual serial port
 after the async round-trip — not a mock, and not just a unit test.
-A real incoming call was also tested live: **RING generation and `ATA`
-both confirmed working.** Auto-answer did not, and the cause was a real
-bug, not just an unverified path: `ModemInstanceConfig::autoAnswerRingCount`
+A real incoming call was also tested live: RING generation and `ATA`
+both worked. Auto-answer initially did not — the cause was a real bug,
+not just an unverified path: `ModemInstanceConfig::autoAnswerRingCount`
 was parsed from `AutoAnswerRingCount=` but never written into the S0
 register anywhere, so it silently had no effect unless `ATS0=n` was
 typed manually first. Fixed via `ModemStateMachine::InitializeAutoAnswerRegister()`,
-called from `ModemInstance`'s constructor — **re-verify auto-answer
-specifically** against a real incoming call before treating it as done.
-Also not yet verified: the graceful Ctrl+C shutdown path now that it has
-to tear down `PjsipCallController`/`PjsipEndpoint` too (only
-forced-process-kill shutdown has been exercised with SIP active so far).
+called from `ModemInstance`'s constructor. **Phase 2 is now fully
+verified**: re-tested live after the fix — auto-answer works, and two
+simultaneously-registered instances (extensions 1003 and 1004, same
+Asterisk server) both reached `CONNECT` on real calls. Not yet
+verified: the graceful Ctrl+C shutdown path now that it has to tear down
+`PjsipCallController`/`PjsipEndpoint` too (only forced-process-kill
+shutdown has been exercised with SIP active so far) — a pre-existing gap
+carried over from Phase 1/multi-instance, not something Phase 2 made
+worse.
+
+## RTP audio (Phase 3)
+
+Phase 2's calls connected (`CONNECT`) but carried no media —
+`PjsipEndpoint::Start()` called `audDevManager().setNullDev()`
+specifically to avoid touching a host audio device before audio
+transport was the thing being built and tested. Phase 3 replaces that:
+
+- **Media config** (`PjsipEndpoint::Start()`): `clockRate`/`sndClockRate`
+  both set to 8000 (matches G.711 natively — no resampling anywhere in
+  the chain), `noVad = true` (a steady modem carrier is never "silence";
+  VAD/silence suppression would clip real data), `ecTailLen = 0`
+  (disables echo cancellation). These three map directly to
+  `docs/PROJECT_SPEC.md` section 4.D's instruction to "disable or avoid
+  audio processing that corrupts modem tones". There is no separate AGC
+  toggle in pjsua2's `MediaConfig` to disable explicitly — if automatic
+  gain control later proves to be a problem for modem tones, that needs
+  digging into `pjmedia_snd_port`-level options directly, since pjsua2
+  doesn't expose one.
+- **Codec restriction** (`PjsipEndpoint::RestrictCodecsToG711()`, called
+  once after `libStart()`): every codec except `PCMU`/`PCMA` (G.711) is
+  disabled process-wide (`codecSetPriority(..., 0)`) — per
+  `docs/PROJECT_SPEC.md` section 4.E, a lossy voice codec (Opus, Speex,
+  GSM, iLBC, ...) would corrupt modem tones outright, so none of them
+  should ever be negotiable, not just de-prioritized.
+- **Audio sink** (`SipCall::onCallMediaState` in `PjsipCallController.cpp`):
+  for Phase 3's testable deliverable, each call's active audio media is
+  connected bidirectionally to this machine's default sound device
+  (`AudDevManager::getPlaybackDevMedia()`/`getCaptureDevMedia()`) — not
+  yet to anything DSP-shaped, since Phase 4 doesn't exist yet. This
+  means: (a) the sound device opens lazily on first connected call, for
+  the process's lifetime, which is expected and temporary; (b) with
+  multiple simultaneous instances, only one physical sound device exists
+  on this machine, so only one line's audio is meaningfully audible at a
+  time if more than one call is active — a real constraint of this
+  temporary sink, not a bug, and one Phase 4 removes entirely by
+  replacing the sink with a per-line DSP channel instead of shared
+  hardware.
+- **Why a sound device and not a custom `AudioMediaPort` straight to a
+  DSP seam**: discussed explicitly with the user before starting Phase
+  3. A real, byear-verifiable sound device sink was chosen over a
+  stubbed PCM-frame seam (e.g. writing to a WAV file) because it's the
+  most directly convincing proof that G.711 negotiation, RTP transport,
+  and codec fidelity are all correct — and it doesn't block Phase 4,
+  which just takes over the same `AudioMedia` connection point
+  (`onCallMediaState` is the seam; what it connects to is what changes).
+
+**Not yet verified** (as of this writing): this code has only been
+smoke-tested for startup (both instances register, no crash, no
+codec/media errors logged) — no call has actually gone active yet, so
+the sound-device connection in `onCallMediaState` has never actually
+run. The real test, planned next: a physical analog line, through the
+Cisco FXS gateway and Asterisk, dialing into extension 1003 (and/or
+1004), to confirm audio is actually audible and bidirectional. This
+would be the first point in the project where audio flows end-to-end
+through the real signal path described in `docs/PROJECT_SPEC.md`
+section 2's topology diagram (minus the Windows-98-client leg, which
+isn't wired up yet) — update this section with the real result once
+that test has actually happened, not before.
+
+Separately, even once that test passes: it only proves the audio is
+clean enough for *human voice* to sound right, which is a good sign for
+codec/transport correctness but is not the same test as a real V.32bis
+handshake tone surviving the path undistorted — that's Phase 4's job to
+prove, once there's a DSP engine that can tell the difference between
+"sounds fine" and "decodes correctly".
 
 ## What exists today
 

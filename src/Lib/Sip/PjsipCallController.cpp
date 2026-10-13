@@ -90,6 +90,42 @@ public:
         }
     }
 
+    // Phase 3: wire this call's audio to the local sound device so a
+    // connected call is actually audible — see PjsipEndpoint::Start() for
+    // the codec/AEC/VAD configuration that keeps this path from mangling
+    // modem tones. Phase 4 replaces this with the DSP engine; nothing
+    // else about call handling needs to change when that happens.
+    void onCallMediaState(pj::OnCallMediaStateParam& prm) override {
+        PJ_UNUSED_ARG(prm);
+
+        pj::CallInfo info;
+        try {
+            info = getInfo();
+        } catch (const pj::Error&) {
+            return;
+        }
+
+        for (unsigned i = 0; i < info.media.size(); ++i) {
+            if (info.media[i].type != PJMEDIA_TYPE_AUDIO || info.media[i].status != PJSUA_CALL_MEDIA_ACTIVE) {
+                continue;
+            }
+
+            pj::Media* media = getMedia(i);
+            auto* audioMedia = dynamic_cast<pj::AudioMedia*>(media);
+            if (audioMedia == nullptr) {
+                continue;
+            }
+
+            try {
+                pj::AudDevManager& audioDevices = pj::Endpoint::instance().audDevManager();
+                audioMedia->startTransmit(audioDevices.getPlaybackDevMedia());
+                audioDevices.getCaptureDevMedia().startTransmit(*audioMedia);
+            } catch (const pj::Error& err) {
+                impl_.logger_.Error("Failed to connect call audio to the sound device: " + err.info());
+            }
+        }
+    }
+
 private:
     PjsipCallController::Impl& impl_;
 };

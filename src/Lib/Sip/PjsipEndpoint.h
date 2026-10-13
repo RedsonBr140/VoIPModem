@@ -43,6 +43,13 @@ public:
     pj::Endpoint& Raw();
 
 private:
+    // Disables every codec except PCMU/PCMA (G.711): per
+    // docs/PROJECT_SPEC.md section 4.E/D, modem tones must travel over an
+    // uncompressed G.711 path, never a lossy voice codec (Opus/Speex/GSM/
+    // iLBC/...) that would corrupt them. Applied process-wide, after
+    // libStart(), since PJSIP's codec priority table isn't per-account.
+    void RestrictCodecsToG711();
+
     Logger& logger_;
     std::unique_ptr<pj::Endpoint> endpoint_;
     bool started_ = false;
