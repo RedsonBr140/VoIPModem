@@ -569,8 +569,31 @@ effort, not a near-complete one:
   scrambler/descrambler (shared infrastructure V.34 needs regardless of
   the harder pieces on top).
 - Carrier recovery and an adaptive equalizer.
-- V.34-specific: line probing (INFO0/1/2/4, probe tones, L1/L2), shell
-  mapping, trellis encoding and Viterbi decoding, rate negotiation.
+- **V.34 line probing, started (2026-10-18)**: `V34Crc`/`V34Info0`
+  implement the bit-level CRC (clause 10.1.2.3.2) and INFO0 sequence
+  codec (Table 14/V.34) confirmed against the real ITU-T V.34 (02/98)
+  text (its public PDF from itu.int, same `pdftotext` approach as V.8).
+  This project's own capabilities are represented honestly-minimal
+  (`MakeDefaultLocalInfo0()`): no optional symbol rates, no power
+  reduction, no 1664-point constellations. Deliberately scoped to just
+  INFO0's bit layout in isolation, the same discipline used for
+  `V8Message` before `V8CallMenu`/`V8Signal`/`V8Handshake` existed.
+  Honest caveat on the CRC itself: clause 10.1.2.3.2's Figure 14 is a
+  circuit-diagram image, not machine-readable text, so the exact
+  shift-register wiring was inferred (reflected CRC-16/X-25-family
+  algorithm for that polynomial/preset) rather than confirmed
+  pixel-by-pixel; it's verified against the independent, external
+  standard CRC-16/X-25 test vector, not yet against a real V.34 modem's
+  actual INFO sequences. Not yet done, in rough order: INFO1a/INFO1c
+  (they carry *computed* line-probing results this codebase can't
+  produce yet), the DBPSK modulation/demodulation that turns these bits
+  into/from real audio (a new technique -- differential phase, not
+  amplitude/frequency like everything built so far), Tone A/Tone B
+  generation and phase-reversal detection, the actual L1/L2 multitone
+  probe signals and their channel-response analysis, round-trip-delay
+  measurement, and the Phase 2 procedure's sequencing/timing/retry
+  rules (11.2) that tie all of the above together. Then: shell mapping,
+  trellis encoding and Viterbi decoding, rate negotiation.
 - Any interoperability test against a real modem, physical or
   software — nothing in this phase has been claimed as "working" per
   CLAUDE.md's rule against claiming standard support without

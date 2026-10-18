@@ -83,6 +83,8 @@
     <ClCompile Include="FskTests.cpp" />
     <ClCompile Include="V8MessageTests.cpp" />
     <ClCompile Include="V8CallMenuTests.cpp" />
+    <ClCompile Include="V34CrcTests.cpp" />
+    <ClCompile Include="V34Info0Tests.cpp" />
     <ClCompile Include="V8SignalTests.cpp" />
     <ClCompile Include="AnsamToneTests.cpp" />
     <ClCompile Include="V8HandshakeTests.cpp" />

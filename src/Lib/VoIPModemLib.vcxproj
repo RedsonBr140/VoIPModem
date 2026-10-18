@@ -81,6 +81,8 @@
     <ClInclude Include="Dsp\V8Signal.h" />
     <ClInclude Include="Dsp\AnsamTone.h" />
     <ClInclude Include="Dsp\V8Handshake.h" />
+    <ClInclude Include="Dsp\V34Crc.h" />
+    <ClInclude Include="Dsp\V34Info0.h" />
     <ClInclude Include="Hayes\AtCommand.h" />
     <ClInclude Include="Hayes\AtCommandParser.h" />
     <ClInclude Include="Serial\ISerialPort.h" />
@@ -106,6 +108,8 @@
     <ClCompile Include="Dsp\V8Signal.cpp" />
     <ClCompile Include="Dsp\AnsamTone.cpp" />
     <ClCompile Include="Dsp\V8Handshake.cpp" />
+    <ClCompile Include="Dsp\V34Crc.cpp" />
+    <ClCompile Include="Dsp\V34Info0.cpp" />
     <ClCompile Include="Hayes\AtCommandParser.cpp" />
     <ClCompile Include="Serial\WindowsSerialPort.cpp" />
     <ClCompile Include="Config\AppConfig.cpp" />
