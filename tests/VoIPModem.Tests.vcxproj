@@ -79,6 +79,13 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="AppConfigTests.cpp" />
     <ClCompile Include="AtCommandParserTests.cpp" />
+    <ClCompile Include="DspPrimitiveTests.cpp" />
+    <ClCompile Include="FskTests.cpp" />
+    <ClCompile Include="V8MessageTests.cpp" />
+    <ClCompile Include="V8CallMenuTests.cpp" />
+    <ClCompile Include="V8SignalTests.cpp" />
+    <ClCompile Include="AnsamToneTests.cpp" />
+    <ClCompile Include="V8HandshakeTests.cpp" />
     <ClCompile Include="ModemStateMachineTests.cpp" />
   </ItemGroup>
   <ItemGroup>

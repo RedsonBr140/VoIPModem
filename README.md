@@ -17,9 +17,21 @@ WAV file and a looping test tone played back, rather than a live sound
 device, since this dev machine has no microphone at the Windows API
 level and pjsua2's device layer is duplex-only (see
 `docs/ARCHITECTURE.md` "RTP audio (Phase 3)") — came through clean and
-audible. **There is no modem DSP implementation yet (Phase 4)** — Phase
-3 only proves audio *transport* is clean, not that a real modem
-handshake survives it; that's next.
+audible. **Phase 4 (modem DSP) is in progress, from scratch** — a V.21
+FSK modulator/demodulator and a full ITU-T V.8 handshake (ANSam/CM/JM/
+CJ) are implemented and unit-tested (including an in-process loopback
+simulation that reaches a negotiated outcome end to end), and wired
+into real call audio. **Live-tested between two real VoIPModem
+instances over Asterisk**: reached a negotiated outcome on both sides
+at least once, but **not reliably** — real audio jitter intermittently
+breaks the handshake's receiver sync in ways the loopback simulation
+never exercised, because this codebase still has no real symbol-timing/
+clock recovery, just a one-shot sync heuristic. See `docs/ROADMAP.md`
+Phase 4 for the live-test findings and what's next. There is still no
+actual V.32bis/V.34
+modulation (QAM, scrambler, equalizer, trellis coding) — V.8 only
+negotiates which modulation to use next, it doesn't implement any of
+them.
 
 ## Build
 
@@ -72,12 +84,14 @@ Or open `VoIPModem.sln` in Visual Studio and build normally. Only
 3. Run `VoIPModem.exe [path-to-ini]`.
 4. Open the other side of each COM pair in a terminal emulator and type
    `AT`, `ATI`, `ATZ`, `ATD<number>`, etc.
-5. Once a call connects, it plays a looping test tone
-   (`assets/test-tone.wav`, copied next to the `.exe` at build time) and
-   records the incoming audio to `call-recording-<extension>-<timestamp>.wav`
-   next to the `.exe` — check that file afterward to verify audio
-   actually made it through clean (see `docs/ARCHITECTURE.md` "RTP audio
-   (Phase 3)" for why it's file-based rather than live playback).
+5. Once a call connects, both sides run the real ITU-T V.8 handshake
+   over the call audio (ANSam, CM/JM, CJ) and log the negotiated
+   outcome — each side currently only ever advertises V.21 (the one
+   modulation actually implemented), not a real modem connection yet
+   (see `docs/ARCHITECTURE.md` "Modem DSP (Phase 4)"). A single
+   instance calling a plain phone cannot exercise this meaningfully —
+   a phone never transmits V.8 back — so this needs two VoIPModem
+   instances calling each other to actually negotiate anything.
 6. Stop with Ctrl+C.
 
 ## Test

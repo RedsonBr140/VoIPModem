@@ -1,25 +1,12 @@
 #include "PjsipCallController.h"
 
-#include <ctime>
 #include <pjsua2.hpp> // must precede Windows.h: pulls in winsock2.h before windows.h can pull in the conflicting legacy winsock.h
 
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
+#include "CallAudioBridge.h"
 
 namespace voipmodem {
 
 namespace {
-
-// Directory the running .exe lives in, with a trailing backslash — used
-// to resolve assets/output files relative to the binary rather than
-// whatever the current working directory happens to be when launched.
-std::string GetExecutableDirectory() {
-    char path[MAX_PATH] = {};
-    const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-    std::string full(path, length);
-    const size_t lastSlash = full.find_last_of("\\/");
-    return lastSlash == std::string::npos ? "" : full.substr(0, lastSlash + 1);
-}
 
 // SIP final-status -> Hayes result code. This is a deliberately small,
 // documented approximation (see docs/ARCHITECTURE.md "SIP integration
@@ -85,8 +72,8 @@ public:
 
 class SipCall : public pj::Call {
 public:
-    SipCall(pj::Account& account, PjsipCallController::Impl& impl, int callId = PJSUA_INVALID_ID)
-        : pj::Call(account, callId), impl_(impl) {}
+    SipCall(pj::Account& account, PjsipCallController::Impl& impl, bool callingParty, int callId = PJSUA_INVALID_ID)
+        : pj::Call(account, callId), impl_(impl), callingParty_(callingParty) {}
 
     void onCallState(pj::OnCallStateParam& prm) override {
         PJ_UNUSED_ARG(prm);
@@ -106,18 +93,12 @@ public:
         }
     }
 
-    // Phase 3: wire this call's audio to a WAV recorder (RX) and a looping
-    // test-tone WAV player (TX) so audio actually flows through the call
-    // without needing any physical sound device — see PjsipEndpoint::Start()
-    // for the codec/AEC/VAD configuration that keeps this path from
-    // mangling modem tones. This replaces an earlier live-sound-device
-    // version: PJSIP's device APIs (both the default-device lookup and
-    // ExtraAudioDevice) hardcode PJMEDIA_DIR_CAPTURE_PLAYBACK, so neither
-    // works at all on a machine with zero capture devices (confirmed to be
-    // the case on the dev machine via waveInGetNumDevs() == 0 — not a
-    // VoIPModem bug, a real PJSIP/hardware constraint). Phase 4 replaces
-    // this WAV-based sink with the DSP engine; nothing else about call
-    // handling needs to change when that happens.
+    // Phase 4's first call-media wiring increment: replaces Phase 3's WAV
+    // recorder/player with CallAudioBridge, a custom AudioMediaPort that
+    // generates/detects handshake-relevant tones using the src/Lib/Dsp
+    // primitives — see CallAudioBridge.h for exactly what this does and
+    // does not prove (a tone can be put on the wire and heard back; no
+    // handshake, modulation, or data mode yet).
     void onCallMediaState(pj::OnCallMediaStateParam& prm) override {
         PJ_UNUSED_ARG(prm);
 
@@ -139,39 +120,22 @@ public:
                 continue;
             }
 
-            if (!recorder_) {
+            if (!audioBridge_) {
                 try {
-                    recorder_ = std::make_unique<pj::AudioMediaRecorder>();
-                    recorder_->createRecorder(BuildRecordingPath());
-                    audioMedia->startTransmit(*recorder_);
+                    audioBridge_ = std::make_unique<CallAudioBridge>(callingParty_, impl_.logger_);
+                    audioBridge_->Start(*audioMedia);
                 } catch (const pj::Error& err) {
-                    impl_.logger_.Error("Failed to start recording call audio: " + err.info());
-                    recorder_.reset();
-                }
-            }
-
-            if (!player_) {
-                try {
-                    player_ = std::make_unique<pj::AudioMediaPlayer>();
-                    player_->createPlayer(GetExecutableDirectory() + "test-tone.wav"); // loops by default
-                    player_->startTransmit(*audioMedia);
-                } catch (const pj::Error& err) {
-                    impl_.logger_.Error("Failed to play test tone into call: " + err.info());
-                    player_.reset();
+                    impl_.logger_.Error("Failed to start tone-probe audio bridge: " + err.info());
+                    audioBridge_.reset();
                 }
             }
         }
     }
 
 private:
-    std::string BuildRecordingPath() const {
-        return GetExecutableDirectory() + "call-recording-" + impl_.instanceLabel_ + "-" +
-               std::to_string(static_cast<long long>(std::time(nullptr))) + ".wav";
-    }
-
     PjsipCallController::Impl& impl_;
-    std::unique_ptr<pj::AudioMediaRecorder> recorder_;
-    std::unique_ptr<pj::AudioMediaPlayer> player_;
+    bool callingParty_;
+    std::unique_ptr<CallAudioBridge> audioBridge_;
 };
 
 class SipAccount : public pj::Account {
@@ -185,7 +149,7 @@ public:
     }
 
     void onIncomingCall(pj::OnIncomingCallParam& iprm) override {
-        auto call = std::make_unique<SipCall>(*this, impl_, iprm.callId);
+        auto call = std::make_unique<SipCall>(*this, impl_, /*callingParty=*/false, iprm.callId);
 
         if (impl_.activeCall_ || impl_.pendingIncomingCall_) {
             // A modem line only ever handles one call at a time; reject
@@ -286,7 +250,7 @@ void PjsipCallController::Dial(const std::string& number) {
     }
 
     try {
-        auto call = std::make_unique<SipCall>(*impl_->account_, *impl_);
+        auto call = std::make_unique<SipCall>(*impl_->account_, *impl_, /*callingParty=*/true);
         pj::CallOpParam callParam(true);
         call->makeCall("sip:" + number + "@" + config_.server, callParam);
         impl_->activeCall_ = std::move(call);

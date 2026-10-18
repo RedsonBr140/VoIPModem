@@ -15,6 +15,7 @@ src/
     Hayes/                 AT command parsing
     Serial/                Serial port abstraction + Win32 implementation
     Sip/                   PJSIP integration (PjsipEndpoint, PjsipCallController)
+    Dsp/                   Modem DSP, from scratch (Phase 4) -- see "Modem DSP (Phase 4)" below
     Config/                INI loading, AppConfig (one ModemInstanceConfig per line)
     Logging/               Leveled logger + TaggedLogger (per-instance prefix)
   App/                     VoIPModem (executable)
@@ -297,12 +298,278 @@ done.**
 
 What this does *not* prove, carried forward as Phase 4's job: this only
 shows a sine tone (or human voice) survives the path cleanly — not that
-a real V.32bis handshake tone would survive undistorted at the bit
+a real V.34 handshake tone would survive undistorted at the bit
 level. That's for a DSP engine to prove, once one exists that can tell
-"sounds fine" from "decodes correctly" apart. The WAV
-recorder/player seam in `SipCall::onCallMediaState` is exactly where
-that DSP engine plugs in — swap what's connected to `audioMedia`,
-nothing about SIP signaling or the modem state machine needs to change.
+"sounds fine" from "decodes correctly" apart. The WAV recorder/player
+seam in `SipCall::onCallMediaState` was exactly where that DSP engine
+would plug in — and, as of Phase 4's first wiring increment, it already
+has: this sink has been **replaced** by `CallAudioBridge` (see "Modem
+DSP (Phase 4)" below). The description above is left as a historical
+record of what Phase 3 actually verified live; it is no longer what the
+code does.
+
+## Modem DSP (Phase 4)
+
+`src/Lib/Dsp` is a new module boundary, kept separate from `src/Lib/Sip`
+for the same reason `ICallController` keeps modem logic separate from
+serial I/O: SIP call state, modem DSP state, and (eventually) PPP session
+state must stay independently reasoned-about, per `docs/PROJECT_SPEC.md`
+section 4 and CLAUDE.md's architectural boundaries. The Dsp module itself
+still knows nothing about pjsua2 — the integration lives entirely in
+`src/Lib/Sip/CallAudioBridge`, which depends on Dsp's public headers the
+same direction `PjsipCallController` already depends on `Core`'s.
+
+**Why building from scratch, not vendoring a library**: see
+`docs/ROADMAP.md` Phase 4 for the full library survey (spandsp, slmodemd
+via D-Modem, fisher-modem, Microchip's dsPIC30F library, VOCAL) and why
+each was rejected. In short: nothing Windows-portable and permissively
+licensed has a working V.32bis or V.34 engine today, and the one
+implementation that does work (slmodemd) is Linux/x86-32-only, GPL-2 with
+a murkier license in later versions, and can't answer calls. The actual
+ITU-T V.34/V.8 Recommendations are the implementation reference; D-Modem
+is consulted only for architectural ideas, never as a code source, to
+avoid pulling its GPL-2 licensing into a project that isn't GPL.
+
+**Current state**: a primitive toolkit only, all operating at 8 kHz (the
+same rate `PjsipEndpoint` already negotiates with no resampling, so no
+sample-rate conversion will ever be needed between this module and the
+call-media seam it will eventually plug into):
+- `Dds` -- a phase-accumulator sine/cosine oscillator. Used directly by
+  `ToneGenerator` now; will be the carrier source for QAM I/Q modulation
+  later, so it already exposes a quadrature (`sin`+`cos`) output even
+  though nothing needs the cosine yet.
+- `ToneGenerator` -- TX-side pure tones (the V.25/V.8 handshake runs on
+  a handful of known single-frequency tones: answer tone, calling tone,
+  ANSam).
+- `GoertzelDetector` -- RX-side counterpart: a single-bin DFT tone-energy
+  estimator, far cheaper than a full FFT when only one or two known
+  frequencies matter, which is exactly the handshake-tone case.
+
+6 unit tests (`tests/DspPrimitiveTests.cpp`) cover these: an
+exact-value check on `Dds`'s phase sequence at a quarter of the sample
+rate (not just a loose floating-point tolerance), and `GoertzelDetector`
+correctly distinguishing a tone at its target frequency (~1.0 magnitude)
+from a tone elsewhere or silence (~0), including after `Reset()`.
+
+- `FskModulator`/`FskDemodulator` -- continuous-phase binary FSK at a
+  configurable mark/space/baud rate. Frequencies and roles are V.21's
+  own, confirmed against V.21's frequency table and how V.8 assigns CM
+  (calling party) to channel 1 and JM (answering party) to channel 2,
+  not assumed: channel 1 mark 980 Hz/space 1180 Hz, channel 2 mark
+  1650 Hz/space 1850 Hz, both at 300 baud. Includes V.21/V.8-style async
+  byte framing (1 start bit/8 data bits LSB-first/1 stop bit, no
+  parity) -- the framing CI/CM/JM octets actually travel in.
+  `FskDemodulator` has an explicitly documented limitation: no
+  symbol-timing recovery, so it only decodes correctly when the caller
+  already knows where bit boundaries start.
+
+5 more unit tests (`tests/FskTests.cpp`, 68 total): bit-level loopback,
+byte-level async-framing loopback, two malformed/misaligned-input
+cases, and `Fsk_ChunkedDelivery_MatchesWholeBufferDecoding` -- which
+matters most: it proves that re-running `DemodulateBits` over a buffer
+that grows frame-by-frame (exactly how real call audio arrives, in
+160-sample/20ms chunks, not one buffer) decodes identically to one-shot
+decoding over the whole thing, *before* any of this touched real call
+audio.
+
+**Call-media wiring, increment 1 (superseded) -- `src/Lib/Sip/CallAudioBridge`**:
+`SipCall::onCallMediaState`
+now creates a `CallAudioBridge` instead of Phase 3's
+`AudioMediaRecorder`/`AudioMediaPlayer`. It's a pjsua2 `AudioMediaPort`
+subclass -- a custom bidirectional audio port, not a file-backed one --
+registered into the conference bridge via `createPort()` and connected
+both ways (`callAudio.startTransmit(*this)` for RX,
+`startTransmit(callAudio)` for TX), at 8kHz mono 16-bit PCM, 20ms/160-sample
+frames (`PJMEDIA_FORMAT_PCM` via `MediaFormatAudio::init`). Per call:
+- **TX** (`onFrameRequested`): the answering side (`callingParty == false`)
+  generates the ITU-T V.25 answer tone (2100 Hz, via `ToneGenerator`) into
+  every outgoing frame; the calling side currently sends silence -- this
+  increment only wires up the answerer's half of V.25's tone exchange.
+- **RX** (`onFrameReceived`): both sides run a `GoertzelDetector` over
+  each incoming frame (reset per-frame, since one frame is already
+  exactly one 160-sample Goertzel block) at a configured target
+  frequency, and log (via the shared `TaggedLogger`) each time detection
+  crosses a magnitude threshold in either direction.
+- `callingParty` is threaded from where `SipCall` is actually constructed
+  (`PjsipCallController::Dial()` -> `true`; `SipAccount::onIncomingCall()`
+  -> `false`), matching the V.8/V.25 calling-party-vs-answerer convention
+  these DSP primitives already follow.
+
+**What this honestly proves, and what it doesn't**: this confirms a real
+tone generated by this module survives the full SIP/RTP/G.711 path and
+can be detected coming back (or from a real peer), using actual call
+audio rather than a unit test's synthetic signal -- a legitimate exercise
+of the seam. It is explicitly **not** a V.8/V.25 handshake: there is no
+negotiation, no state machine, and the RX target frequency
+(`kRxProbeTargetHz` = 1100 Hz in `CallAudioBridge.cpp`) is called out in
+its own comment as a wiring-verification placeholder, not yet a real V.8
+CI/CM signal detector. **No claim of V.32bis or V.34 support exists
+anywhere in this codebase**, per CLAUDE.md's rule against claiming a
+modem standard is supported before it's implemented and
+interoperability-tested. Build-verified (`VoIPModem.sln`, 0
+warnings/errors at `/W4`) and unit-test-verified (63/63 passing,
+including the 6 DSP primitive tests).
+
+**Live-tested 2026-10-17**: a real phone call, through the Cisco FXS
+gateway and Asterisk, into extension 1004 (`[Modem.Line2]` — the only
+instance that was up this round; `[Modem.Line1]`/COM4 failed to open,
+`GetLastError=5`/Access Denied, a pre-existing environment issue
+unrelated to this change and not yet resolved). Auto-answer fired after
+2 rings (`ATA`), the call ran ~24 seconds, then was hung up (`ATH`). The
+log showed nothing in between those two lines — `CONNECT` itself isn't
+logged anywhere (only written to the serial port), and, more
+importantly, **`CallAudioBridge::Start()` had no success log of its own
+at the time**, so the log alone couldn't confirm whether call media ever
+went active or the bridge actually started. The only verification
+available was a human on the physical line, who confirmed hearing "a
+dial-up tone, that static" during the call — real, human-confirmed proof
+that a tone generated by this module survived the full
+SIP/RTP/G.711/FXS path to a real phone line. The RX side never logged a
+detection, which is expected, not a failure: nothing on an ordinary
+phone call transmits a clean tone at the placeholder probe frequency.
+**Found and fixed from this test**: added an explicit success log to
+`CallAudioBridge::Start()` (role, TX behavior, RX target) so the next
+live test doesn't depend solely on someone's ear — exactly the kind of
+observability gap CLAUDE.md's "structured logging for... DSP
+negotiation" rule exists to catch, and it was only caught by actually
+running the test rather than assuming the wiring worked because it
+compiled.
+
+`[Modem.Line1]`/COM4's earlier Access Denied turned out to be a stray
+PuTTY session sitting on COM4 during the test, not a real bug -- nothing
+to fix in code.
+
+**Call-media wiring, increment 2 -- superseding the tone probe above**:
+`CallAudioBridge` no longer sends a single tone. Each side now
+continuously transmits an incrementing counter byte via `FskModulator`
+on its role-correct V.21 channel (calling party: channel 1 TX/channel 2
+RX; answering party: channel 2 TX/channel 1 RX) and continuously tries
+to decode the other side's bytes back via `FskDemodulator`. Each
+decoded byte is logged, flagged as sequential or not (a real decode
+error, distinct from "no signal yet"). `CallAudioBridge::Start()` keeps
+the success-log fix from increment 1.
+
+**Live-tested and a real bug found and fixed (2026-10-17)**: the first
+version of `FskDemodulator` (`DemodulateBits`) required the caller to
+keep an ever-growing sample buffer and re-decode it from scratch every
+20ms frame -- proven correct in isolation
+(`Fsk_ChunkedDelivery_MatchesWholeBufferDecoding`), but once wired into
+a real call this turned into unbounded per-frame CPU growth on PJSIP's
+media thread: after about 90 seconds, no bytes ever decoded and the
+call stopped responding to teardown at all. `FskDemodulator` was
+rewritten so `ProcessSamples` carries all bit-boundary state as members
+across calls (O(1) amortized per sample, no growing buffer);
+`CallAudioBridge` keeps a periodically-compacted `pendingBits_` instead.
+Re-tested live: a call stayed healthy (near-zero CPU, flat memory) for
+3+ minutes and shut down cleanly on `ATH`/Ctrl+C. Zero `decoded byte`
+log lines is expected in that test, not a regression -- the far end was
+a plain phone, which has no FSK transmitter of its own.
+
+**A second, distinct bug was then found and deliberately deferred**:
+hanging up from the far end (the physical phone, not `ATH`) still does
+not tear down the call on our side. Re-confirmed *after* the CPU fix
+above, which rules out that fix's theory as the explanation here: CPU
+time stayed near zero and memory flat while the call sat stuck, so it
+isn't a busy loop. No log line appears at all after `CallAudioBridge
+started`, meaning PJSIP's `onCallState` never saw
+`PJSIP_INV_STATE_DISCONNECTED` -- most likely because no SIP BYE ever
+arrived from Asterisk (an FXS disconnect-supervision issue on the
+Cisco gateway/Asterisk side, not confirmed as a VoIPModem bug at all),
+but an attempt to verify that via Asterisk's own `core show channels
+verbose` was inconclusive because `VoIPModem.exe` was stopped before
+the check ran, which tears down our own SIP dialog on exit and makes
+"0 channels" meaningless as evidence either way. See `docs/ROADMAP.md`
+Phase 4 for the full account. Logged to come back to, not fixed yet --
+by explicit user direction, Phase 4 DSP work continued instead.
+
+Build-verified clean (`VoIPModem.sln`, 0 warnings at `/W4`); all 83
+tests pass. Still no real symbol-timing recovery: both sides' bit
+boundaries are only right because each counts from its own call's
+start, not from anything derived from the signal itself.
+
+**V.8 octet-level codec (`src/Lib/Dsp/V8Message`, new)**: the actual
+ITU-T Recommendation V.8 (11/2000) text was obtained and read in full
+(its PDF, freely downloadable from itu.int) -- clauses 5 and 6 define
+exactly how CI/CM/JM/CJ's bits are packed, and this module implements
+just that: category/extension octet packing, the call function octet
+(including `Data`, the one this project needs), the 3-octet modulation
+modes field (V.21 through V.34), PCM modem availability, the protocol
+octet (LAPM), the PSTN access octet, the CI/CM/JM preamble bit patterns,
+and the CJ terminator. 15 new unit tests assert exact bit patterns
+against the spec's own tables (not just round-trips), after a first,
+layout-preserving PDF-to-text pass garbled some of Table 3's columns --
+a clean re-extraction was used to avoid coding a guessed mapping. This
+is pure bit packing: no audio, no sequence assembly, no state machine
+yet, the same "primitive in isolation first" discipline as `Dds`/
+`GoertzelDetector` before `FskModulator`/`FskDemodulator` existed.
+
+**The full handshake, built on that codec (`V8CallMenu`, `V8Signal`,
+`AnsamTone`, `V8Handshake` -- all new, same session)**: `V8CallMenu`
+bundles call function + modulation modes + optional categories into one
+menu (encode/decode, mode intersection per 7.4, "lowest item number
+wins" selection). `V8Signal` builds one CI/CM/JM/CJ bit sequence through
+`FskModulator` and finds/reads one back out of a demodulated bitstream.
+`AnsamTone` is a new DSP primitive (2100 Hz, 15 Hz AM envelope, 450ms
+phase reversals implemented as just negating the sample). `V8Handshake`
+is the actual clause 8 state machine for both roles (call DCE: wait for
+ANSam, silent Te, CM while waiting for 2 identical JM, send CJ; answer
+DCE: initial silence, ANSam while waiting for 2 identical CM, JM while
+waiting for CJ) -- CI deliberately skipped (7.1: optional), no
+retry/timeout handling, Te/initial-silence fixed at the spec's own
+minimums.
+
+**Two real bugs found by this class's own loopback unit test, not code
+review** (full account in `docs/ROADMAP.md` Phase 4): (1) receiving
+`FskDemodulator`s started ticking their bit-clock long before the other
+side's real signal arrived, leaving them phase-misaligned with the
+transmitter's actual bit edges (no real symbol-timing recovery exists
+in this codebase) -- fixed with a frequency-selective lazy-sync
+(`std::optional<FskDemodulator>`, constructed the moment energy at that
+channel's own mark/space frequencies first appears, not just any loud
+sample, since ANSam's 2100 Hz tone would otherwise trigger a false
+sync). (2) Once sync was fixed, every preamble was found but every menu
+decode failed, because "not enough data buffered yet" was being treated
+the same as "genuine false positive," permanently skipping a real
+preamble before its trailing octets had fully arrived -- fixed by only
+committing to a decode on a genuine framing failure (the real
+end-of-sequence marker), always retrying the same position otherwise.
+
+Result: 8 new tests (105 total) reach `Negotiated` on both sides,
+including correct mode-intersection on a mismatch -- but this is a
+**lossless, in-process loopback simulation**, not a real call; it
+proves the state machine, not survival of a real SIP/RTP/G.711 path.
+
+**Wired into `CallAudioBridge`, superseding the FSK counter-byte
+probe**: one `V8Handshake` per call, advertising only V.21 (the one
+modulation actually implemented -- not V.32bis/V.34, per CLAUDE.md's
+rule against claiming unimplemented standards). Logs the negotiated
+mode once reached. Since pjsua2 calls `onFrameReceived`/
+`onFrameRequested` separately but `ProcessFrame` wants both at once,
+the real work happens in `onFrameReceived` (buffering that frame's TX
+output as a side effect), and `onFrameRequested` just drains it.
+**Live-tested between two real VoIPModem instances over Asterisk
+(2026-10-17)**: reached `Negotiated` on both sides at least once --
+the first real call either side of this project has ever fully
+negotiated. Found and fixed a real bug on the way (lingering ANSam
+energy, delayed by RTP/jitter-buffer latency, was faking out the
+receiver's lazy edge-sync; see `docs/ROADMAP.md` Phase 4 for the full
+account and the fix, `FeedSyncedDemodulator`'s `competingHz`/
+`competingThreshold` gate). But it is **not reliable across repeated
+attempts** -- real audio jitter intermittently breaks the same
+lazy-sync heuristic in other ways (a garbled-but-self-consistent menu
+decode on one run, a stalled CM match on another), all symptoms of one
+root cause: there is still no real symbol-timing/clock recovery
+anywhere in this codebase, just a one-shot "sync to the first loud
+sample" heuristic that isn't robust to real-world jitter.
+
+Still not done, in the order they're planned (see `docs/ROADMAP.md`
+Phase 4 for detail): **real symbol-timing recovery** (now the clear
+next step, per the live test above -- not another one-off heuristic
+patch), retry/timeout handling in `V8Handshake`, the far-end-hangup
+bug, QAM constellation mapping, the scrambler/descrambler, carrier
+recovery, the adaptive equalizer, and every V.34-specific piece (line
+probing, shell mapping, trellis coding/Viterbi decoding, rate
+negotiation).
 
 ## What exists today
 
@@ -394,8 +661,16 @@ nothing about SIP signaling or the modem state machine needs to change.
 - RTP/audio transport (Phase 3) — SIP *signaling* works
   (`PjsipCallController`), but no media is negotiated or carried;
   `PjsipEndpoint::Start()` explicitly sets a null audio device.
-- Modem DSP / modulation / demodulation (Phase 4) — no audio or bitstream
-  processing exists anywhere in the codebase.
+- Modem DSP / modulation / demodulation (Phase 4) — a primitive toolkit
+  exists (`src/Lib/Dsp`: oscillator, tone generator/detector, V.21-rate
+  FSK modulator/demodulator) and a full ITU-T V.8 handshake
+  (`V8Message`/`V8CallMenu`/`V8Signal`/`AnsamTone`/`V8Handshake`) is
+  implemented and wired into real call audio via `CallAudioBridge` —
+  but it's only been verified in a lossless loopback simulation, not a
+  real call yet, and there is still no symbol-timing recovery, no
+  retry/timeout handling, and no actual QAM/trellis modulation (V.8
+  only negotiates *which* modulation to use next; it doesn't implement
+  any of them). See "Modem DSP (Phase 4)" above.
 - RAS/PPP integration (Phase 5).
 - Actual data flow in online mode: `ModemState::OnlineData` is now reached
   (via `HandleCallEvent(Connected)` once a real SIP call connects), but

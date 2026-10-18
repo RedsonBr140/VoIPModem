@@ -70,6 +70,17 @@
     <ClInclude Include="Core\NullCallController.h" />
     <ClInclude Include="Core\ResultCodes.h" />
     <ClInclude Include="Core\SRegisters.h" />
+    <ClInclude Include="Dsp\DspTypes.h" />
+    <ClInclude Include="Dsp\Dds.h" />
+    <ClInclude Include="Dsp\ToneGenerator.h" />
+    <ClInclude Include="Dsp\GoertzelDetector.h" />
+    <ClInclude Include="Dsp\FskModulator.h" />
+    <ClInclude Include="Dsp\FskDemodulator.h" />
+    <ClInclude Include="Dsp\V8Message.h" />
+    <ClInclude Include="Dsp\V8CallMenu.h" />
+    <ClInclude Include="Dsp\V8Signal.h" />
+    <ClInclude Include="Dsp\AnsamTone.h" />
+    <ClInclude Include="Dsp\V8Handshake.h" />
     <ClInclude Include="Hayes\AtCommand.h" />
     <ClInclude Include="Hayes\AtCommandParser.h" />
     <ClInclude Include="Serial\ISerialPort.h" />
@@ -80,10 +91,21 @@
     <ClInclude Include="Logging\TaggedLogger.h" />
     <ClInclude Include="Sip\PjsipEndpoint.h" />
     <ClInclude Include="Sip\PjsipCallController.h" />
+    <ClInclude Include="Sip\CallAudioBridge.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Core\ModemStateMachine.cpp" />
     <ClCompile Include="Core\ResultCodes.cpp" />
+    <ClCompile Include="Dsp\Dds.cpp" />
+    <ClCompile Include="Dsp\ToneGenerator.cpp" />
+    <ClCompile Include="Dsp\GoertzelDetector.cpp" />
+    <ClCompile Include="Dsp\FskModulator.cpp" />
+    <ClCompile Include="Dsp\FskDemodulator.cpp" />
+    <ClCompile Include="Dsp\V8Message.cpp" />
+    <ClCompile Include="Dsp\V8CallMenu.cpp" />
+    <ClCompile Include="Dsp\V8Signal.cpp" />
+    <ClCompile Include="Dsp\AnsamTone.cpp" />
+    <ClCompile Include="Dsp\V8Handshake.cpp" />
     <ClCompile Include="Hayes\AtCommandParser.cpp" />
     <ClCompile Include="Serial\WindowsSerialPort.cpp" />
     <ClCompile Include="Config\AppConfig.cpp" />
@@ -91,6 +113,7 @@
     <ClCompile Include="Logging\Logger.cpp" />
     <ClCompile Include="Sip\PjsipEndpoint.cpp" />
     <ClCompile Include="Sip\PjsipCallController.cpp" />
+    <ClCompile Include="Sip\CallAudioBridge.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
