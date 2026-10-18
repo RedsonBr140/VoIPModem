@@ -554,22 +554,42 @@ negotiated. Found and fixed a real bug on the way (lingering ANSam
 energy, delayed by RTP/jitter-buffer latency, was faking out the
 receiver's lazy edge-sync; see `docs/ROADMAP.md` Phase 4 for the full
 account and the fix, `FeedSyncedDemodulator`'s `competingHz`/
-`competingThreshold` gate). But it is **not reliable across repeated
-attempts** -- real audio jitter intermittently breaks the same
+`competingThreshold` gate). But it was **not reliable across repeated
+attempts** -- real audio jitter intermittently broke the same
 lazy-sync heuristic in other ways (a garbled-but-self-consistent menu
 decode on one run, a stalled CM match on another), all symptoms of one
-root cause: there is still no real symbol-timing/clock recovery
-anywhere in this codebase, just a one-shot "sync to the first loud
-sample" heuristic that isn't robust to real-world jitter.
+root cause: no real symbol-timing/clock recovery anywhere in this
+codebase, just a one-shot "sync to the first loud sample" heuristic
+that isn't robust to real-world jitter.
+
+**Real symbol-timing recovery implemented in `FskDemodulator`
+(2026-10-18)**: an early-late gate (re-measuring each decided bit's
+winning tone in windows shifted slightly earlier/later than where it
+was actually placed) feeding a PI loop filter (proportional term for
+quick phase correction, integral term for tracking a *sustained* rate
+mismatch -- essential, not optional: a proportional-only first attempt
+left a nonzero steady-state error against sustained drift and still
+desynced). The honest source of drift this tracks: both ends compute
+at the same nominal 8kHz with no separate crystals, but a VoIP jitter
+buffer's accelerate/expand concealment genuinely plays audio back
+very slightly off-rate. Proven in `FskTests.cpp` against a synthetic
+0.6%-off-baud stream (verified to actually fail with the loop disabled
+first). Re-tested live against the same two-instance setup: 5/5
+consecutive dial/redial cycles reached `Negotiated` on both sides with
+*correct* `selected mode: V.21` logged on both lines every time -- the
+garbled-decode and CM-stall failures above did not recur. This fixes
+drift-tracking once a demodulator exists; `V8Handshake`'s own lazy
+"sync on first loud sample" heuristic, deciding *when* to construct
+one, is unchanged, and genuine carrier/clock recovery at V.32bis/V.34's
+actual symbol rates and constellations remains a separate, harder
+problem.
 
 Still not done, in the order they're planned (see `docs/ROADMAP.md`
-Phase 4 for detail): **real symbol-timing recovery** (now the clear
-next step, per the live test above -- not another one-off heuristic
-patch), retry/timeout handling in `V8Handshake`, the far-end-hangup
-bug, QAM constellation mapping, the scrambler/descrambler, carrier
-recovery, the adaptive equalizer, and every V.34-specific piece (line
-probing, shell mapping, trellis coding/Viterbi decoding, rate
-negotiation).
+Phase 4 for detail): retry/timeout handling in `V8Handshake`, the
+far-end-hangup bug, QAM constellation mapping, the scrambler/
+descrambler, carrier recovery, the adaptive equalizer, and every
+V.34-specific piece (line probing, shell mapping, trellis coding/
+Viterbi decoding, rate negotiation).
 
 ## What exists today
 

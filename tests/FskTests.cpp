@@ -128,3 +128,58 @@ TEST(Fsk_ChunkedDelivery_MatchesWholeBufferDecoding) {
         EXPECT_EQ(static_cast<int>(decodedBytes[i]), static_cast<int>(originalBytes[i]));
     }
 }
+
+// Symbol-timing recovery (FskDemodulator.h's class comment) exists to
+// track a slow phase drift between transmitter and receiver, not a
+// single fixed start-of-stream offset -- tried that first and found
+// this demodulator's threshold-comparison decision is already fairly
+// forgiving of a static sub-bit misalignment on its own. The honest
+// source of real drift here isn't a mismatched crystal (there isn't
+// one -- both ends are computed at the same nominal 8kHz, see
+// DspTypes.h) but a VoIP jitter buffer's own accelerate/expand
+// concealment, which genuinely plays audio back very slightly faster
+// or slower than it was recorded to adapt its buffer level. This test
+// stands in for that: it modulates at a baud rate very slightly off
+// the demodulator's configured nominal rate, so the true bit edges
+// drift steadily away from the receiver's assumed grid over a long
+// stream -- enough drift, left uncorrected, to eventually land on the
+// wrong side of a transition and flip a decision.
+TEST(Fsk_SymbolTimingRecovery_TracksSlowBaudMismatch) {
+    std::vector<std::uint8_t> originalBytes;
+    for (int i = 0; i < 40; ++i) {
+        originalBytes.push_back(static_cast<std::uint8_t>((i * 97 + 13) & 0xFF)); // varied, not a fixed pattern
+    }
+
+    // 0.6% fast: small enough to be a plausible jitter-buffer
+    // concealment rate, large enough to accumulate several samples of
+    // drift over this many bits.
+    FskModulator modulator(kMarkHz, kSpaceHz, kBaudRate * 1.006, 0.8f, kSampleRateHz);
+    std::vector<Sample> allSamples;
+    for (std::uint8_t byte : originalBytes) {
+        modulator.ModulateByteAsync(allSamples, byte);
+    }
+
+    FskDemodulator demodulator(kMarkHz, kSpaceHz, kBaudRate, kSampleRateHz); // unaware of the mismatch
+    const std::vector<bool> bits = demodulator.ProcessSamples(allSamples);
+
+    size_t cursor = 0;
+    std::vector<std::uint8_t> decodedBytes;
+    while (true) {
+        const auto decoded = FskDemodulator::TryDecodeAsyncByte(bits, cursor);
+        if (!decoded.has_value()) {
+            break;
+        }
+        decodedBytes.push_back(decoded.value());
+    }
+
+    // Drift accumulates forward in time, so any truncation from
+    // rounding belongs at the very end, not the start -- compare from
+    // the front, tolerating a short tail this test doesn't require.
+    constexpr size_t kTailToleranceBytes = 2;
+    EXPECT_TRUE(decodedBytes.size() + kTailToleranceBytes >= originalBytes.size());
+
+    const size_t compareCount = std::min(decodedBytes.size(), originalBytes.size());
+    for (size_t i = 0; i < compareCount; ++i) {
+        EXPECT_EQ(static_cast<int>(decodedBytes[i]), static_cast<int>(originalBytes[i]));
+    }
+}

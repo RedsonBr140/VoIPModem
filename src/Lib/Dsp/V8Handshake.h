@@ -56,6 +56,13 @@ enum class V8HandshakeOutcome { InProgress, Negotiated, Failed };
 //   more than a placeholder, but nothing here picks a *different* call
 //   function when the requested one isn't available (8.2.3) -- this
 //   implementation only ever offers V8CallFunction::Data.
+// - (2026-10-18 update: FskDemodulator now has real symbol-timing
+//   recovery -- an early-late gate feeding a PI loop filter, see its
+//   own header -- so the paragraph below is no longer fully accurate;
+//   left as-is since it's still true of *this* lazy-sync layer, which
+//   decides *when* to construct a demodulator in the first place and
+//   is unchanged. FskDemodulator's new tracking starts only once that
+//   decision has been made; it cannot undo a bad one.)
 // - No real symbol-timing/clock recovery exists anywhere in this
 //   codebase. A receiving FskDemodulator that starts ticking its own
 //   bit-clock well before the other side's signal actually arrives

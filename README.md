@@ -23,11 +23,17 @@ CJ) are implemented and unit-tested (including an in-process loopback
 simulation that reaches a negotiated outcome end to end), and wired
 into real call audio. **Live-tested between two real VoIPModem
 instances over Asterisk**: reached a negotiated outcome on both sides
-at least once, but **not reliably** — real audio jitter intermittently
-breaks the handshake's receiver sync in ways the loopback simulation
-never exercised, because this codebase still has no real symbol-timing/
-clock recovery, just a one-shot sync heuristic. See `docs/ROADMAP.md`
-Phase 4 for the live-test findings and what's next. There is still no
+at least once, but was **not initially reliable** — real audio jitter
+intermittently broke the handshake's receiver sync in ways the loopback
+simulation never exercised, because the FSK demodulator had no real
+symbol-timing/clock recovery, just a one-shot sync heuristic. A real
+early-late-gate-plus-PI-loop symbol-timing recovery has since been
+added and re-verified live (5/5 clean negotiations, no recurrence of
+the earlier failures); the lazy "sync on first loud sample" heuristic
+that decides *when* a demodulator starts still exists underneath it,
+and real carrier/clock recovery for actual V.32bis/V.34 modulation is
+separate, harder work still ahead. See `docs/ROADMAP.md` Phase 4 for
+the live-test findings and what's next. There is still no
 actual V.32bis/V.34
 modulation (QAM, scrambler, equalizer, trellis coding) — V.8 only
 negotiates which modulation to use next, it doesn't implement any of

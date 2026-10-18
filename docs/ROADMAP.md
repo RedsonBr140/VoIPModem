@@ -485,6 +485,62 @@ modulation will need this far more than V.8's slow 300-baud signaling
 does, so this is worth solving properly before going further, not
 patching around again.
 
+**Real symbol-timing recovery implemented in `FskDemodulator`
+(2026-10-18)**, per the above. This is a classic early-late gate
+feeding a PI loop filter, not another one-off heuristic: a few samples
+after each bit is decided, the same winning tone (whichever of mark/
+space won) is re-measured in a window shifted slightly earlier and
+slightly later than where this object actually placed it
+(`timingDelta_`, ~1/6 of a bit). The resulting energy difference is the
+classic early-late timing-error signal. A proportional term
+(`kProportionalGain`) folds a quick phase nudge straight into the
+existing fractional `bitLengthRemainder_` accumulator (the same
+mechanism `FskModulator` already uses for its own +-1 sample/bit rate
+compensation); an integral term (`kIntegralGain`) separately
+accumulates into `estimatedRateErrorSamplesPerBit_`, a persistent
+correction to the *average* bit length itself. The integral term turned
+out to be essential, not a nice-to-have: a first attempt using only a
+proportional nudge converged to a nonzero steady-state phase error
+against a sustained rate mismatch (textbook P-only control), which was
+enough to desync decoding by bit ~90 of a 400-bit test stream. Adding
+the integral term fixed it -- confirmed in `FskTests.cpp`'s
+`Fsk_SymbolTimingRecovery_TracksSlowBaudMismatch`, which simulates the
+honest source of drift in this system (there's no mismatched crystal --
+both ends compute at the same nominal 8kHz; see `DspTypes.h` -- but a
+VoIP jitter buffer's own accelerate/expand concealment genuinely plays
+audio back very slightly faster or slower than it was recorded) by
+modulating 0.6% off the demodulator's nominal baud rate and requiring
+correct decoding throughout a long stream. That test was written to
+fail first: it was verified to fail with the loop gain zeroed out
+(severe byte loss from accumulated drift) before being left in its
+passing, corrected form -- the standard a unit test needs to actually
+prove a fix matters, not just exercise code. A simpler first attempt at
+this test (a single fixed phase offset injected at the very start of a
+stream, modeling a lazy sync landing mid-bit) was tried first and
+**found not to need correction at all** -- this demodulator's plain
+threshold comparison is already fairly tolerant of a static sub-bit
+misalignment; the discriminator curve's genuine weakness is tracking
+a *sustained* rate error, not absorbing a one-time offset, which is
+part of why the real bug (below) is about jitter-buffer-style drift,
+not just "which sample did the lazy sync start on."
+
+**Re-tested live** against the same two-instance setup
+(`Line1`/COM4/ext. 1004 calling `Line2`/COM6/ext. 1003) immediately
+after this change: 5 consecutive dial/hangup/redial cycles, all 5
+reached `Negotiated` on both sides, and -- unlike the previous
+session's runs -- every single one correctly logged
+`selected mode: V.21` on *both* lines (the earlier `selected mode:
+unknown` garbled-decode and the CM-matching stall described above did
+not recur in any of the 5 attempts). 5 clean runs isn't a rigorous
+reliability bound and this still isn't `V8Handshake`'s own lazy
+"sync on first loud sample" edge-detection heuristic being replaced --
+that heuristic still decides *when* a demodulator starts existing at
+all; what changed is that once it exists, it now actually tracks the
+real bit clock instead of assuming its own start was perfectly aligned
+forever. But going from roughly one reliability bug surfacing per
+2-3 live attempts to 5-for-5 is a real, measurable improvement, not
+just a plausible-sounding mechanism.
+
 Not yet done — this is genuinely a handful of increments into a large
 effort, not a near-complete one:
 - `[Modem.Line1]`/COM4's Access Denied — turned out to just be a stray
@@ -496,10 +552,16 @@ effort, not a near-complete one:
   roughly 15-25 seconds before it clears and the next dial succeeds —
   consistent with the same no-BYE-on-exit theory, not new evidence, but
   worth noting since it was hit repeatedly this session.)
-- **Real symbol-timing/clock recovery** — the actual next step now,
-  per the live-test findings immediately above. Without it, V.8
-  negotiation is unreliable and real V.32bis/V.34 data modulation
-  would be hopeless.
+- **Real symbol-timing/clock recovery** — implemented in
+  `FskDemodulator` (early-late gate + PI loop, see above) and
+  re-verified live (5/5 clean negotiations). What's still open: this
+  tracks drift once a demodulator exists, but `V8Handshake`'s own
+  lazy "sync on first loud sample" edge-detection heuristic (deciding
+  *when* to construct one) is unchanged -- and V.32bis/V.34's actual
+  QAM data modulation will need genuine carrier/clock recovery at a
+  much higher symbol rate than V.21's 300 baud, which this specific
+  implementation (tuned for V.21's Goertzel-threshold FSK decisions)
+  doesn't address.
 - CI (optional per spec, genuinely skipped, not just deferred).
 - Retry/timeout handling in `V8Handshake` — right now a handshake that
   never completes just sits in `InProgress` forever.
@@ -529,6 +591,22 @@ client — has not been started.
 ---
 
 ## Recommended next step
+
+**Target confirmed: V.34, not `docs/PROJECT_SPEC.md`'s literal "modest
+target" of V.32bis (2026-10-17).** Worth recording why, since the two
+docs could otherwise read as contradicting each other: V.32bis doesn't
+need V.8 at all (pre-V.8 modems negotiated it directly via their own
+tone/training sequence), but V.34 has no call-setup of its own -- it
+*requires* V.8 to even begin. So the full V.8 handshake built this
+session isn't scope creep over a V.32bis target; it's a hard
+prerequisite for the real target, which is V.34. `V8CallMenu` currently
+only advertises V.21 (what's actually implemented), not because V.8
+itself is more limited than that -- the same V.8 envelope will carry
+V.34 once V.34's modulation is built. This doesn't block an earlier,
+smaller win along the way: V.32bis could still be implemented first
+and offered through the same V.8 menu (real modems that speak V.8 will
+happily negotiate down to it), without needing V.32bis's own separate
+pre-V.8 handshake path.
 
 Phases 1-3 are done and verified live. Phase 4 is underway from scratch,
 targeting V.34. So far, live-tested: the tone-probe increment (a real
@@ -562,15 +640,15 @@ codebase actually has working).
 instances, calling each other over the real Asterisk server, reached
 `Negotiated` on both sides at least once. It also found a real bug
 (lingering-ANSam false sync) that got fixed, and surfaced the deeper
-issue clearly: **the handshake is not reliable over real audio without
-actual symbol-timing/clock recovery.** That's the honest next step now
-— not another targeted patch for whichever specific jitter pattern
-broke this run, but real bit-clock tracking (early-late gate or
-Mueller & Müller timing-error detection feeding a PLL). After that's
-in place and the handshake is reliably reaching `Negotiated`, the
+issue clearly: **the handshake was not reliable over real audio without
+actual symbol-timing/clock recovery.** That's been implemented now (an
+early-late gate feeding a PI loop filter in `FskDemodulator` — see
+above) and re-verified live: 5/5 clean negotiations, no more garbled
+mode decodes or CM-matching stalls across repeat attempts. The
 remaining Phase 4 work is: retry/timeout handling in `V8Handshake`, the
 deferred far-end-hangup bug, and then the much larger remaining climb
 to actual V.32bis/V.34 modulation (QAM, scrambler, carrier recovery,
 equalizer, trellis coding) — V.8 only negotiates which of those to use
-next; it doesn't implement any of them, and all of them will need real
-clock recovery even more than V.8 does.
+next; it doesn't implement any of them, and genuine carrier/clock
+recovery at V.32bis/V.34's actual symbol rates and constellations is a
+separate, harder problem than this V.21-tuned fix solves.
