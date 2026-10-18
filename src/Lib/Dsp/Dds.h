@@ -28,6 +28,13 @@ public:
     // configured frequency.
     void Reset();
 
+    // Adds a discrete phase jump (radians) on top of the continuous
+    // carrier, without touching the configured frequency or restarting
+    // it -- e.g. a differential-PSK modulator's 180-degree symbol
+    // rotations (see DbpskModulator), applied once per symbol between
+    // otherwise-uninterrupted carrier cycles.
+    void AddPhase(double radians);
+
 private:
     int sampleRateHz_;
     double phaseIncrement_ = 0.0; // radians per sample

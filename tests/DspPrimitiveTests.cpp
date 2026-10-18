@@ -35,6 +35,24 @@ TEST(Dds_Reset_RewindsPhaseWithoutChangingFrequency) {
     EXPECT_TRUE(NearlyEqual(dds.NextSample(), 0.0, 1e-6));
 }
 
+TEST(Dds_AddPhase_JumpsWithoutDisturbingSubsequentFrequency) {
+    Dds dds(2000.0, 8000);
+    dds.NextSample(); // phase now at pi/2
+    dds.AddPhase(3.14159265358979323846); // +pi: a differential-PSK-style 180-degree symbol flip
+    // Continuing from pi/2 + pi = 3pi/2: sin(3pi/2) = -1, then same
+    // quarter-sample-rate quadrature sequence as before, just phase-shifted.
+    EXPECT_TRUE(NearlyEqual(dds.NextSample(), -1.0, 1e-6));
+    EXPECT_TRUE(NearlyEqual(dds.NextSample(), 0.0, 1e-6));
+    EXPECT_TRUE(NearlyEqual(dds.NextSample(), 1.0, 1e-6));
+}
+
+TEST(Dds_AddPhase_WrapsNegativeAndOverlyLargeAngles) {
+    Dds dds(2000.0, 8000);
+    dds.AddPhase(-3.14159265358979323846); // -pi, from phase 0 -- should wrap to a valid [0, 2pi) phase
+    EXPECT_TRUE(NearlyEqual(dds.NextSample(), 0.0, 1e-6)); // sin(-pi) == sin(pi) == 0
+    EXPECT_TRUE(NearlyEqual(dds.NextSample(), -1.0, 1e-6));
+}
+
 TEST(GoertzelDetector_ToneAtTargetFrequency_ReadsFullAmplitude) {
     const double frequencyHz = 2100.0; // V.25 answer tone (ANS)
     const int blockSize = 160;         // 20ms at 8kHz

@@ -39,4 +39,14 @@ void Dds::Reset() {
     phase_ = 0.0;
 }
 
+void Dds::AddPhase(double radians) {
+    phase_ += radians;
+    while (phase_ >= kTwoPi) {
+        phase_ -= kTwoPi;
+    }
+    while (phase_ < 0.0) {
+        phase_ += kTwoPi;
+    }
+}
+
 } // namespace voipmodem::dsp

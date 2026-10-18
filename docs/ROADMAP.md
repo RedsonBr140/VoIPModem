@@ -584,11 +584,32 @@ effort, not a near-complete one:
   algorithm for that polynomial/preset) rather than confirmed
   pixel-by-pixel; it's verified against the independent, external
   standard CRC-16/X-25 test vector, not yet against a real V.34 modem's
-  actual INFO sequences. Not yet done, in rough order: INFO1a/INFO1c
-  (they carry *computed* line-probing results this codebase can't
-  produce yet), the DBPSK modulation/demodulation that turns these bits
-  into/from real audio (a new technique -- differential phase, not
-  amplitude/frequency like everything built so far), Tone A/Tone B
+  actual INFO sequences.
+  **DBPSK modulation/demodulation added (same day)**: `DbpskModulator`/
+  `DbpskDemodulator` implement 10.1.2.3.1's actual modulation -- a new
+  technique for this codebase, differential *phase* rather than
+  frequency (FSK) or amplitude. The carrier runs continuously (built on
+  `Dds`, which gained an `AddPhase()` method for the discrete 180-degree
+  symbol jumps) and each symbol's bit is decided by correlating against
+  the *previous* symbol, not an assumed absolute phase -- the point of
+  using a differential scheme at all, since it doesn't need to know the
+  channel's absolute phase offset. `EmitReferenceSymbol()` models
+  10.1.2.3.1's "preceded by a point at an arbitrary carrier phase"
+  requirement explicitly. 5 new tests (124 total), including one that
+  specifically exercises the all-zero-bits/never-rotates path, not just
+  whichever path a mixed pattern happens to hit most, and one confirming
+  back-to-back sequences correctly share a single reference point per
+  the spec's own wording. Still only a loopback-tested DSP primitive --
+  not yet wired to `V34Info0`'s bits, not carrying the 2400Hz/1200Hz
+  carrier-plus-guard-tone choice 10.1.2.3.1 actually specifies for the
+  answer/call modem (that's `CallAudioBridge`/sequence-building's job,
+  same separation `ToneGenerator`/`AnsamTone` keep from `FskModulator`),
+  and with no symbol-timing recovery of its own yet (a new primitive,
+  doesn't inherit `FskDemodulator`'s early-late gate automatically).
+  Not yet done, in rough order: wiring `V34Info0` through
+  `DbpskModulator`/`DbpskDemodulator` to actually transmit/receive a
+  real INFO0 sequence end to end, INFO1a/INFO1c (they carry *computed*
+  line-probing results this codebase can't produce yet), Tone A/Tone B
   generation and phase-reversal detection, the actual L1/L2 multitone
   probe signals and their channel-response analysis, round-trip-delay
   measurement, and the Phase 2 procedure's sequencing/timing/retry
