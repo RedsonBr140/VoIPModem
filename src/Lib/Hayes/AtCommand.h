@@ -13,6 +13,8 @@ enum class AtCommandType {
     SetEcho,          // ATEn
     SetVerbose,       // ATVn
     SetQuiet,         // ATQn
+    SetSpeakerVolume, // ATLn -- real modems' physical speaker volume; see ModemProfile.h
+    SetSpeakerMode,   // ATMn -- real modems' physical speaker on/off/when; see ModemProfile.h
     SetRegister,      // ATSn=v
     QueryRegister,    // ATSn?
     Dial,             // ATDxxxx / ATDTxxxx / ATDPxxxx

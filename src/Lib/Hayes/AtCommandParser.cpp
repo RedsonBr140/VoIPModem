@@ -199,6 +199,8 @@ AtParseResult AtCommandParser::Parse(const std::string& line) {
             case 'E': type = AtCommandType::SetEcho; break;
             case 'V': type = AtCommandType::SetVerbose; break;
             case 'Q': type = AtCommandType::SetQuiet; break;
+            case 'L': type = AtCommandType::SetSpeakerVolume; break;
+            case 'M': type = AtCommandType::SetSpeakerMode; break;
             case 'I': type = AtCommandType::Identify; break;
             case 'H': type = AtCommandType::HangUp; break;
             default:

@@ -215,12 +215,36 @@ TEST(AmpersandF_RestoresDefaultsAfterChanges) {
     TaggedLogger taggedLogger(logger, "Test");
     ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
-    core.Execute(AtCommandParser::Parse("ATE0V0Q1"));
+    core.Execute(AtCommandParser::Parse("ATE0V0Q1L0M0"));
     core.Execute(AtCommandParser::Parse("AT&F"));
 
     EXPECT_TRUE(core.Profile().echoEnabled);
     EXPECT_TRUE(core.Profile().verboseResultCodes);
     EXPECT_TRUE(!core.Profile().quietMode);
+    EXPECT_EQ(core.Profile().speakerVolume, 2);
+    EXPECT_EQ(core.Profile().speakerMode, 1);
+}
+
+TEST(AtL_SetsSpeakerVolume_ReturnsOk) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.Execute(AtCommandParser::Parse("ATL3"));
+    EXPECT_TRUE(outcome.finalResult == ResultCode::OK);
+    EXPECT_EQ(core.Profile().speakerVolume, 3);
+}
+
+TEST(AtM_SetsSpeakerMode_ReturnsOk) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.Execute(AtCommandParser::Parse("ATM2"));
+    EXPECT_TRUE(outcome.finalResult == ResultCode::OK);
+    EXPECT_EQ(core.Profile().speakerMode, 2);
 }
 
 TEST(FClassTest_ReportsDataOnlySupport) {

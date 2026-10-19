@@ -63,6 +63,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Audio\WindowsAudioOutput.h" />
     <ClInclude Include="Core\ICallController.h" />
     <ClInclude Include="Core\ModemProfile.h" />
     <ClInclude Include="Core\ModemState.h" />
@@ -104,6 +105,7 @@
     <ClInclude Include="Sip\CallAudioBridge.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Audio\WindowsAudioOutput.cpp" />
     <ClCompile Include="Core\ModemStateMachine.cpp" />
     <ClCompile Include="Core\ResultCodes.cpp" />
     <ClCompile Include="Dsp\Dds.cpp" />

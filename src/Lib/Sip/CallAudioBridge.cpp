@@ -98,6 +98,25 @@ void CallAudioBridge::onFrameRequested(pj::MediaFrame& frame) {
     }
 }
 
+void CallAudioBridge::PlayLocally(const std::vector<dsp::Sample>& rxSamples,
+                                   const std::vector<dsp::Sample>& txSamples) {
+    if (!localSpeaker_.IsAvailable()) {
+        return;
+    }
+    // A real phone line acoustically mixes both directions onto the one
+    // wire a monitoring speaker taps; mirror that by summing RX (the
+    // far end's tones) and TX (this side's own) rather than playing
+    // only one direction.
+    std::vector<dsp::Sample> mixed(std::max(rxSamples.size(), txSamples.size()), 0.0f);
+    for (size_t i = 0; i < rxSamples.size(); ++i) {
+        mixed[i] += rxSamples[i];
+    }
+    for (size_t i = 0; i < txSamples.size(); ++i) {
+        mixed[i] += txSamples[i];
+    }
+    localSpeaker_.Write(mixed);
+}
+
 void CallAudioBridge::onFrameReceived(pj::MediaFrame& frame) {
     const unsigned sampleCount = static_cast<unsigned>(frame.buf.size()) / sizeof(int16_t);
     if (sampleCount == 0) {
@@ -116,6 +135,7 @@ void CallAudioBridge::onFrameReceived(pj::MediaFrame& frame) {
     // to do once Negotiated.
     if (phase2Handshake_.has_value()) {
         phase2Handshake_->ProcessFrame(samples, pendingTxSamples_, static_cast<int>(sampleCount));
+        PlayLocally(samples, pendingTxSamples_);
 
         if (!loggedRtd_ && phase2Handshake_->GetOutcome() == dsp::V34Phase2Outcome::RoundTripDelayMeasured) {
             loggedRtd_ = true;
@@ -130,6 +150,7 @@ void CallAudioBridge::onFrameReceived(pj::MediaFrame& frame) {
     }
 
     handshake_.ProcessFrame(samples, pendingTxSamples_, static_cast<int>(sampleCount));
+    PlayLocally(samples, pendingTxSamples_);
 
     if (!loggedOutcome_ && handshake_.GetOutcome() == dsp::V8HandshakeOutcome::Negotiated) {
         loggedOutcome_ = true;

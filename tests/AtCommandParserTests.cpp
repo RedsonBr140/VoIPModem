@@ -54,6 +54,32 @@ TEST(ChainedCommands_AllParsed) {
     EXPECT_EQ(result.commands[2].numericParam.value_or(-1), 0);
 }
 
+TEST(AtL_IsSetSpeakerVolume) {
+    const auto result = AtCommandParser::Parse("ATL1");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetSpeakerVolume);
+    EXPECT_EQ(result.commands[0].numericParam.value_or(-1), 1);
+}
+
+TEST(AtM_IsSetSpeakerMode) {
+    const auto result = AtCommandParser::Parse("ATM0");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetSpeakerMode);
+    EXPECT_EQ(result.commands[0].numericParam.value_or(-1), 0);
+}
+
+TEST(AtLAndAtM_ChainWithOtherCommands) {
+    // A common real-world init string shape (Windows' generic "Standard
+    // Modem Types" driver uses something like this).
+    const auto result = AtCommandParser::Parse("ATL2M1E0V1");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_EQ(result.commands.size(), static_cast<size_t>(4));
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetSpeakerVolume);
+    EXPECT_EQ(result.commands[0].numericParam.value_or(-1), 2);
+    EXPECT_TRUE(result.commands[1].type == AtCommandType::SetSpeakerMode);
+    EXPECT_EQ(result.commands[1].numericParam.value_or(-1), 1);
+}
+
 TEST(EchoWithoutDigit_DefaultsToZero) {
     const auto result = AtCommandParser::Parse("ATE");
     EXPECT_TRUE(result.isValid);

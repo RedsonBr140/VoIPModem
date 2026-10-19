@@ -61,6 +61,14 @@ ExecutionOutcome ModemStateMachine::Execute(const AtParseResult& parsed) {
                 outcome.suppressFinalResult = profile_.quietMode;
                 break;
 
+            case AtCommandType::SetSpeakerVolume:
+                profile_.speakerVolume = cmd.numericParam.value_or(0);
+                break;
+
+            case AtCommandType::SetSpeakerMode:
+                profile_.speakerMode = cmd.numericParam.value_or(0);
+                break;
+
             case AtCommandType::SetRegister:
                 registers_.Set(cmd.registerIndex.value_or(0),
                                 static_cast<uint8_t>(cmd.numericParam.value_or(0)));

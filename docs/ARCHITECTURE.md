@@ -580,6 +580,25 @@ project's own instances (e.g. the com0com-paired local test rig), never
 on an instance taking real inbound calls. Not yet live-tested over a
 real call with this flag on.
 
+**Local audio monitoring, "hear the modem" (2026-10-19)**: new
+`src/Lib/Audio/WindowsAudioOutput.h`/`.cpp` wraps winmm's
+`waveOutOpen`/`waveOutWrite` (multi-buffered, polling `WHDR_DONE`
+rather than a callback) to play PCM audio out the Windows default
+sound output device. `CallAudioBridge` mixes every frame's RX+TX audio
+and writes it there unconditionally -- no new config flag, since it
+can't affect the real call, only ever adds a locally-audible monitor.
+There's no separate modem-specific volume/device setting of its own:
+the audio is just an ordinary Windows playback stream, so the
+*existing* Windows Sound settings/Volume Mixer already control it.
+Separately, `AtCommand`/`AtCommandParser`/`ModemStateMachine`/
+`ModemProfile` now accept ATLn/ATMn (speaker volume/mode) instead of
+erroring on them -- real-world motivation: Windows' own "Phone and
+Modem" control panel maps its Properties dialog's volume slider
+directly to ATLn. The two pieces aren't yet connected: ATL/ATM's
+values are stored but not read back by the audio monitor (see
+`docs/ROADMAP.md` Phase 4 for the honest gap, including why closing it
+means crossing the Core/SIP boundary).
+
 **Real symbol-timing recovery implemented in `FskDemodulator`
 (2026-10-18)**: an early-late gate (re-measuring each decided bit's
 winning tone in windows shifted slightly earlier/later than where it

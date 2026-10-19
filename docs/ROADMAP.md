@@ -826,6 +826,48 @@ effort, not a near-complete one:
   remainder of a real V.34 data-mode modem. None of this has been run
   over a real call, and no interoperability test against a real V.34
   modem exists -- per CLAUDE.md, V.34 is NOT claimed as supported.
+- **Hayes ATL/ATM (speaker volume/mode) and local audio monitoring,
+  added (2026-10-19), separate from the V.34 work above.** User asked
+  how to "hear the modem" the way a real modem's on-board speaker lets
+  you hear dialing/negotiation. Two pieces:
+  - `AtCommand.h`/`AtCommandParser.cpp`/`ModemStateMachine.cpp`/
+    `ModemProfile.h` now recognize ATLn (speaker volume) and ATMn
+    (speaker mode), returning OK and storing the value instead of
+    ERROR -- these previously fell through to Unknown. Real-world
+    motivation: Windows' own "Phone and Modem" control panel maps its
+    Properties dialog's "Speaker volume" slider directly to ATLn, and
+    many generic driver init strings include ATM1 or similar; a modem
+    that errors on them breaks RAS/dialer compatibility. 5 new tests
+    (164 total) across the parser and state machine, including
+    `AT&F` restoring both to their factory defaults (L2, M1).
+  - New `src/Lib/Audio/WindowsAudioOutput.h`/`.cpp`: a thin winmm
+    (`waveOutOpen`/`waveOutWrite`, multi-buffered, polling `WHDR_DONE`
+    instead of a callback) wrapper that plays PCM audio out the
+    Windows default sound output device. `CallAudioBridge` now mixes
+    every frame's RX+TX audio (the same way a real 2-wire line
+    acoustically combines both directions onto whatever's tapping it)
+    and writes it there, unconditionally -- not gated behind
+    `enableV34Probing` or any new flag, since it has zero effect on
+    the real call, only ever adds a locally-audible monitor. This is
+    the actual, literal answer to "hear the modem in Windows settings":
+    there is no separate modem-specific settings page: the audio just
+    appears as an ordinary Windows playback stream, so the *existing*
+    Windows Sound settings/Volume Mixer (device choice, mute, volume)
+    already control it, same as any other app's audio.
+  Honest gap between the two pieces: ATL/ATM's *values* are accepted
+  and stored, but `WindowsAudioOutput`/`CallAudioBridge` do not yet
+  read them back -- playback is unconditionally "on" regardless of
+  ATM's 0/1/2/3 setting, and at a fixed, unscaled level regardless of
+  ATL. Wiring that properly means crossing the Core/SIP architectural
+  boundary CLAUDE.md calls out (speaker mode lives in
+  `ModemStateMachine`, the audio itself flows through
+  `CallAudioBridge`, a layer apart) -- not attempted yet, and ATM's
+  "on until carrier detected" semantics would also need real call-state
+  awareness this class doesn't have. Also not yet live-tested with an
+  actual human ear -- `waveOutOpen` either succeeds or silently leaves
+  `IsAvailable() == false` (Write() becomes a no-op) if this machine
+  has no usable output device, and nothing has confirmed yet which case
+  applies here.
 - Any interoperability test against a real modem, physical or
   software — nothing in this phase has been claimed as "working" per
   CLAUDE.md's rule against claiming standard support without
