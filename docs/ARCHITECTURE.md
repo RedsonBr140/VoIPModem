@@ -562,6 +562,24 @@ root cause: no real symbol-timing/clock recovery anywhere in this
 codebase, just a one-shot "sync to the first loud sample" heuristic
 that isn't robust to real-world jitter.
 
+**V.34 Phase 2 handed off from `CallAudioBridge`, opt-in only
+(2026-10-19)**: once `V8Handshake` reaches `Negotiated`, if the
+selected mode is V34Duplex/V34HalfDuplex, `CallAudioBridge` now
+constructs a `dsp::V34Phase2Handshake` and hands the rest of the
+call's audio to it (same `ProcessFrame` cadence), logging RTD and L1
+milestones as they're reached. Gated behind a new
+`ModemInstanceConfig::enableV34Probing` (ini: `EnableV34Probing=1`
+under a `[Modem...]` section), default false, which also controls
+whether this instance's own V8 menu advertises V34Duplex at all --
+**not enabled by default** because a real V.34-capable remote modem
+would commit to training this codebase can only follow through
+Phase 2's first RTD/L1 exchange (see `docs/ROADMAP.md` Phase 4), likely
+hanging or failing the call instead of gracefully negotiating down to
+V.21. Intended only for a controlled test between two of this
+project's own instances (e.g. the com0com-paired local test rig), never
+on an instance taking real inbound calls. Not yet live-tested over a
+real call with this flag on.
+
 **Real symbol-timing recovery implemented in `FskDemodulator`
 (2026-10-18)**: an early-late gate (re-measuring each decided bit's
 winning tone in windows shifted slightly earlier/later than where it

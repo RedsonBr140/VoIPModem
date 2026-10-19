@@ -790,6 +790,26 @@ effort, not a near-complete one:
   guessing at a requirement, not extracting one from the text, so
   nothing past L1 has been attempted. (Flagged to the user directly;
   no decision made yet as of this writing.)
+  **Wired into `CallAudioBridge`, opt-in only (same day)**: once
+  `V8Handshake` reaches `Negotiated` with V34Duplex/V34HalfDuplex
+  selected, `CallAudioBridge` now hands the rest of the call's audio
+  to a `V34Phase2Handshake` instance, logging RTD and L1 milestones.
+  Gated behind new `ModemInstanceConfig::enableV34Probing`
+  (`EnableV34Probing=1` in a `[Modem...]` ini section), default false
+  -- this also controls whether the local V8 menu advertises
+  V34Duplex at all. Deliberately NOT on by default: a real
+  V.34-capable modem calling in would commit to training this
+  codebase can only follow through the first RTD/L1 exchange, likely
+  hanging or failing the call instead of cleanly negotiating down to
+  V.21 the way it does today. Meant for a controlled test between two
+  of this project's own instances, not for an instance taking real
+  inbound calls. 2 new tests (159 total) cover the ini parsing
+  (defaults false, parses an explicit `1`); the wiring itself has NOT
+  yet been live-tested over a real call -- doing that (with this flag
+  enabled only on the test rig's two instances) is the obvious next
+  step, since it would be the first time any of this phase's V.34 work
+  runs against real Asterisk/RTP jitter rather than an idealized
+  sample-perfect loopback.
   Still not implemented: the second Tone A/B reversal exchange that
   follows L1/L2 (11.2.1.1.6/11.2.1.2.6 onward), this implementation's
   own L1/L2 channel-response *analysis* (turning received L1/L2 audio

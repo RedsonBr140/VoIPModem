@@ -22,6 +22,19 @@ struct ModemInstanceConfig {
     std::string modemIdentification = "VoIPModem Virtual Modem";
     int autoAnswerRingCount = 0; // S0; 0 = auto-answer disabled
 
+    // Default false: advertising V34Duplex in this instance's own V8
+    // CM/JM menu makes a real, genuinely-V.34-capable remote modem
+    // commit to V.34 training -- which this codebase can only follow
+    // through Phase 2's first RTD/L1 exchange (see
+    // docs/ROADMAP.md Phase 4), not an actual data connection. A real
+    // modem left waiting for the rest would likely hang or fail the
+    // call instead of gracefully negotiating down to V.21, which is
+    // the one mode this codebase's V8 side currently completes
+    // cleanly. Only turn this on for a controlled test between two of
+    // this project's own instances (e.g. the com0com-paired local
+    // test rig), never on an instance that takes real inbound calls.
+    bool enableV34Probing = false;
+
     // SIP registration for this instance's extension. If sipServer is
     // empty, this instance gets NullCallController instead of real SIP —
     // see ModemInstance and docs/ARCHITECTURE.md "SIP integration (Phase 2)".

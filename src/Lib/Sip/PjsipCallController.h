@@ -17,6 +17,7 @@ struct SipAccountConfig {
     std::string extension; // AOR user part, e.g. "1003"
     std::string password;
     std::string realm = "*";
+    bool enableV34Probing = false; // see ModemInstanceConfig::enableV34Probing's own comment
 };
 
 // Real, PJSIP-backed ICallController: one SIP account (one modem

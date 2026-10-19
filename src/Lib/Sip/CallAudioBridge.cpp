@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace voipmodem {
@@ -10,6 +11,7 @@ namespace {
 
 constexpr int kBitsPerSample = 16;
 constexpr int kFrameTimeUsec = 20000; // 20ms -> 160 samples at 8kHz
+constexpr dsp::Sample kV34NominalAmplitude = 0.8f;
 
 int16_t FloatToPcm16(float sample) {
     const float clamped = std::clamp(sample, -1.0f, 1.0f);
@@ -20,21 +22,27 @@ float Pcm16ToFloat(int16_t sample) {
     return static_cast<float>(sample) / 32768.0f;
 }
 
-dsp::V8CallMenu MakeLocalMenu() {
+dsp::V8CallMenu MakeLocalMenu(bool advertiseV34) {
     dsp::V8CallMenu menu;
     menu.callFunction = dsp::V8CallFunction::Data;
     dsp::V8ModulationModes modes;
-    modes.v21 = true; // the only modulation this codebase actually implements
+    modes.v21 = true; // the only modulation this codebase implements end to end
+    // Only advertised when explicitly opted in -- see
+    // ModemInstanceConfig::enableV34Probing's comment for why this
+    // isn't on by default: a real V.34-capable remote modem would
+    // commit to training this codebase can't finish past Phase 2's
+    // first RTD/L1 exchange.
+    modes.v34Duplex = advertiseV34;
     menu.modulationModes = modes;
     return menu;
 }
 
-std::string DescribeModulationModes(const dsp::V8ModulationModes& modes) {
-    const auto selected = dsp::SelectModulationMode(modes);
-    if (!selected.has_value()) {
-        return "none in common";
-    }
-    switch (selected.value()) {
+bool IsV34Mode(dsp::V8ModulationModeItem item) {
+    return item == dsp::V8ModulationModeItem::V34Duplex || item == dsp::V8ModulationModeItem::V34HalfDuplex;
+}
+
+std::string DescribeModulationModes(dsp::V8ModulationModeItem selected) {
+    switch (selected) {
         case dsp::V8ModulationModeItem::V34Duplex: return "V.34 (duplex)";
         case dsp::V8ModulationModeItem::V34HalfDuplex: return "V.34 (half-duplex)";
         case dsp::V8ModulationModeItem::V32bisOrV32: return "V.32bis/V.32";
@@ -53,11 +61,12 @@ std::string DescribeModulationModes(const dsp::V8ModulationModes& modes) {
 
 } // namespace
 
-CallAudioBridge::CallAudioBridge(bool callingParty, TaggedLogger& logger)
+CallAudioBridge::CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableV34Probing)
     : callingParty_(callingParty),
       logger_(logger),
-      handshake_(callingParty ? dsp::V8Handshake::Role::CallDce : dsp::V8Handshake::Role::AnswerDce, MakeLocalMenu(),
-                 logger) {}
+      enableV34Probing_(enableV34Probing),
+      handshake_(callingParty ? dsp::V8Handshake::Role::CallDce : dsp::V8Handshake::Role::AnswerDce,
+                 MakeLocalMenu(enableV34Probing), logger) {}
 
 void CallAudioBridge::Start(pj::AudioMedia& callAudio) {
     pj::MediaFormatAudio format;
@@ -70,7 +79,8 @@ void CallAudioBridge::Start(pj::AudioMedia& callAudio) {
     startTransmit(callAudio);
 
     logger_.Info(std::string("CallAudioBridge started (") + (callingParty_ ? "calling party" : "answering party") +
-                 "); running the real ITU-T V.8 handshake (ANSam/CM/JM/CJ), advertising V.21 only");
+                 "); running the real ITU-T V.8 handshake (ANSam/CM/JM/CJ), advertising V.21" +
+                 (enableV34Probing_ ? "+V.34 (probing only, not a connection)" : " only"));
 }
 
 void CallAudioBridge::onFrameRequested(pj::MediaFrame& frame) {
@@ -101,16 +111,43 @@ void CallAudioBridge::onFrameReceived(pj::MediaFrame& frame) {
         samples.push_back(Pcm16ToFloat(pcm));
     }
 
+    // Once V8 has handed off to V.34 Phase 2, that state machine owns
+    // this call's audio from here on -- V8Handshake has nothing left
+    // to do once Negotiated.
+    if (phase2Handshake_.has_value()) {
+        phase2Handshake_->ProcessFrame(samples, pendingTxSamples_, static_cast<int>(sampleCount));
+
+        if (!loggedRtd_ && phase2Handshake_->GetOutcome() == dsp::V34Phase2Outcome::RoundTripDelayMeasured) {
+            loggedRtd_ = true;
+            const double rtdMs = phase2Handshake_->GetRoundTripDelaySeconds() * 1000.0;
+            logger_.Info("CallAudioBridge: V.34 Phase 2 round-trip delay measured: " + std::to_string(rtdMs) + "ms");
+        }
+        if (!loggedL1_ && phase2Handshake_->GetHasReceivedL1()) {
+            loggedL1_ = true;
+            logger_.Info("CallAudioBridge: V.34 Phase 2 received L1 (not yet implemented past this point)");
+        }
+        return;
+    }
+
     handshake_.ProcessFrame(samples, pendingTxSamples_, static_cast<int>(sampleCount));
 
     if (!loggedOutcome_ && handshake_.GetOutcome() == dsp::V8HandshakeOutcome::Negotiated) {
         loggedOutcome_ = true;
         const auto& remoteMenu = handshake_.GetRemoteMenu();
-        std::string modeDescription = "unknown";
+        std::optional<dsp::V8ModulationModeItem> selected;
         if (remoteMenu.has_value() && remoteMenu.value().modulationModes.has_value()) {
-            modeDescription = DescribeModulationModes(remoteMenu.value().modulationModes.value());
+            selected = dsp::SelectModulationMode(remoteMenu.value().modulationModes.value());
         }
+        const std::string modeDescription = selected.has_value() ? DescribeModulationModes(selected.value())
+                                                                   : "none in common";
         logger_.Info("CallAudioBridge: V.8 handshake negotiated -- selected mode: " + modeDescription);
+
+        if (enableV34Probing_ && selected.has_value() && IsV34Mode(selected.value())) {
+            phase2Handshake_.emplace(callingParty_ ? dsp::V34Phase2Handshake::Role::CallDce
+                                                    : dsp::V34Phase2Handshake::Role::AnswerDce,
+                                      kV34NominalAmplitude, logger_);
+            logger_.Info("CallAudioBridge: starting V.34 Phase 2 line probing");
+        }
     }
 }
 
