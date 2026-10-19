@@ -11,72 +11,73 @@
 #include "LineProbingSignalGenerator.h"
 #include "TonePhaseReversalDetector.h"
 #include "V34Info0.h"
+#include "V34Info1.h"
 #include "V34InfoSequence.h"
 #include "V34ProbingTones.h"
 #include "../Logging/TaggedLogger.h"
 
 namespace voipmodem::dsp {
 
-enum class V34Phase2Outcome { InProgress, RoundTripDelayMeasured, Failed };
+enum class V34Phase2Outcome { InProgress, RoundTripDelayMeasured, Phase2Complete, Failed };
 
 // Drives one side (call or answer DCE) of ITU-T V.34 clause 11.2's
 // Phase 2 (network interaction/probing) procedure across real call
 // audio, one frame at a time -- same ProcessFrame cadence and overall
-// architecture as V8Handshake (lazily-constructed RX detectors at each
-// decision point, a pending-TX sample queue drained before falling
-// back to live generation), confirmed against the real Recommendation
-// text re-read in full for this increment.
+// architecture as V8Handshake, confirmed against the real
+// Recommendation text, re-read in full (again) for this increment.
 //
-// HONESTLY scoped to 11.2.1.1.1-11.2.1.1.4 (call modem), 11.2.1.2.1-
-// 11.2.1.2.5 (answer modem) -- the INFO0 exchange and the first full
-// Tone A/Tone B phase-reversal exchange that produces each side's own
-// round-trip-delay estimate (RTDEc/RTDEa) -- PLUS the first, simplest
-// slice of L1: the answer DCE transmits it for its fixed 160ms
-// (10.1.2.4) right after .2.5's reversal hold, and the call DCE
-// detects its arrival and tracks that same 160ms window
-// (GetHasReceivedL1()). The answer side implements through .2.5 (not
-// just its own .2.4 RTD calculation) because the call side's second
-// Tone A reversal, which .1.4 needs, IS the answer side's own .2.5
-// action -- both sides' RTD calculations are two sides of the same
-// two 40ms-delayed reversal "echoes".
+// NOW COVERS THE FULL ERROR-FREE PROCEDURE, 11.2.1.1.1-11.2.1.1.8
+// (call modem) and 11.2.1.2.1-11.2.1.2.9 (answer modem): both Tone
+// A/Tone B reversal exchanges and their RTD calculations, both L1/L2
+// probing exchanges (one in each direction), and the INFO1c/INFO1a
+// exchange that hands off into Phase 3. GetOutcome() reaching
+// Phase2Complete is the honest ceiling of what this class claims --
+// see docs/ROADMAP.md for everything Phase 3/4 would still need
+// (shell mapping, trellis/Viterbi, QAM mapping, scrambler, carrier
+// recovery, adaptive equalizer) before any of this could carry real
+// data. None of clause 11.2.2's retry/recovery procedure is
+// implemented (same honestly-deferred gap V8Handshake itself has) --
+// a step that never completes leaves this sitting in InProgress
+// forever, same as V8Handshake's own documented limitation.
 //
-// L2 is deliberately NOT implemented yet, and not because it's hard
-// in the same way the detector/timing pieces were: 11.2.1.1.5/
-// 11.2.1.2.6's own wording ties L2's transmission duration to "the
-// local echo of L2" being received back -- a real PSTN 2-wire/4-wire
-// hybrid-circuit artifact that has no obvious equivalent on a digital
-// VoIP bridge through Asterisk. Implementing a stand-in for that
-// without first deciding what it should even mean here would be
-// guessing at a requirement, not extracting one -- see docs/ROADMAP.md
-// for the open question. L1 itself has no such ambiguity (clause
-// 10.1.2.4 gives it a flat, fixed 160ms duration), which is why it's
-// implemented here and L2 is not.
+// L2's transmission duration was the one genuinely ambiguous piece:
+// 11.2.1.1.6/11.2.1.2.5's wording ties it to the sender "having
+// received the local echo of L2" for up to "550ms plus a round trip
+// delay" -- a real PSTN 2-wire/4-wire hybrid-circuit artifact (the
+// sender's own near-instantaneous, local-only echo of what it's
+// transmitting) with no equivalent on a digital VoIP bridge. Resolved
+// by re-deriving the FULL event sequence from the numbered clauses
+// (not guessed): on real hardware, "received the local echo" happens
+// at essentially the same instant as "started transmitting" (the
+// local-loop delay is negligible next to the hundreds-of-ms budget),
+// so the condition is modeled here as satisfied immediately once L2
+// TX starts. What's actually left gating each side in practice is the
+// OTHER AND'd condition -- detecting the counterpart's tone -- which
+// this class implements for real (same presence-detection idiom used
+// throughout), with the spec's own 550ms+RTD figure kept as the exact
+// safety cap in case that detection never arrives. This is "behaving
+// like a real modem" in the sense that matters: the real gating
+// behavior (wait for the counterpart, capped by a timeout) is
+// faithfully reproduced; only the physically-unmeasurable near-zero
+// local-loop delay is treated as zero, which is what it would
+// measure as on real hardware too.
 //
-// Also explicitly NOT implemented: the SECOND Tone A/B reversal
-// exchange that follows L1/L2 (11.2.1.1.6/11.2.1.2.6 onward),
-// INFO1a/INFO1c, the handoff into Phase 3, and none of clause 11.2.2's
-// retry/recovery procedure (same honestly-deferred gap V8Handshake
-// itself still has). See docs/ROADMAP.md.
+// Known simplification, same as before: a real analog modem's Tone
+// A/B carrier is physically the same continuous-phase carrier used
+// for INFO sequences immediately before it; this implementation
+// restarts each generator's phase at 0 on every mode switch instead.
+// Harmless for the arithmetic (every detector here judges *relative*
+// phase change, never absolute), not literally the same signal a real
+// transmitter would produce.
 //
-// Known simplification: a real analog modem's Tone A/B carrier is
-// physically the same continuous-phase carrier used for INFO0a/INFO0c
-// immediately before it; this implementation instead constructs a
-// fresh ToneAGenerator/ToneBGenerator (phase 0) the moment INFO0 TX
-// finishes. Harmless for the arithmetic here, since
-// TonePhaseReversalDetector only ever judges *relative* phase change
-// against its own baseline, never an absolute reference -- but it is
-// not literally the same signal a real modem's transmitter would put
-// on the line.
-//
-// Known timing imprecision: the RX switch from decoding INFO0 to
-// watching for a tone reversal happens on a whole-frame boundary, not
-// at the exact sample INFO0 finished arriving -- unlike every
-// *reversal's* own timing, which is sample-accurate throughout (both
-// TonePhaseReversalDetector's detection and this class's own
-// scheduled-reversal TX generation split each frame at the exact
-// sample an event is due). The cost is a slightly later start for the
-// reversal detector's own baseline-capture window, not an error in any
-// RTD value actually computed.
+// Known timing imprecision, same as before: every RX mode switch
+// (INFO decode -> tone-watching, tone-watching -> INFO decode, etc.)
+// happens on a whole-frame boundary, not the exact sample the
+// previous thing finished arriving -- costs the newly-armed
+// detector's first window a slightly later start, not an error in any
+// RTD or decoded value actually produced. Every *reversal's* own
+// timing remains sample-accurate throughout, as does L1/L2's
+// transmit-side scheduling.
 class V34Phase2Handshake {
 public:
     enum class Role { CallDce, AnswerDce };
@@ -90,7 +91,7 @@ public:
 
     V34Phase2Outcome GetOutcome() const { return outcome_; }
 
-    // Valid once GetOutcome() == RoundTripDelayMeasured.
+    // Valid once GetOutcome() >= RoundTripDelayMeasured.
     double GetRoundTripDelaySeconds() const { return roundTripDelaySeconds_; }
 
     // Valid once this side has successfully decoded the other side's
@@ -98,52 +99,82 @@ public:
     const std::optional<V34Info0>& GetRemoteInfo0() const { return remoteInfo0_; }
 
     // Call DCE only: true once L1's presence has been detected AND its
-    // full 160ms (10.1.2.4) has elapsed since. Always false on the
-    // answer DCE side (this class doesn't yet expose whether the
-    // answer DCE has *finished transmitting* L1, only that the call
-    // DCE finished receiving it).
+    // full 160ms (10.1.2.4) has elapsed since.
     bool GetHasReceivedL1() const { return l1Received_; }
 
+    // Answer DCE only: valid once it has received the call DCE's
+    // INFO1c (shortly before GetOutcome() == Phase2Complete).
+    const std::optional<V34Info1c>& GetRemoteInfo1c() const { return remoteInfo1c_; }
+
+    // Call DCE only: valid once it has received the answer DCE's
+    // INFO1a (at the same moment GetOutcome() becomes Phase2Complete).
+    const std::optional<V34Info1a>& GetRemoteInfo1a() const { return remoteInfo1a_; }
+
 private:
-    static constexpr double kSilentPeriodSeconds = 0.075;         // 75ms, the spec's own minimum/nominal
-    static constexpr double kReversalHoldSeconds = 0.010;         // "transmitted for Xms after the reversal"
-    static constexpr double kAnswerMinToneADurationSeconds = 0.050;
-    static constexpr double kL1DurationSeconds = 0.160;            // 10.1.2.4's fixed L1 duration
-    static constexpr float kTonePresenceThreshold = 0.25f;        // relative to nominalAmplitude_
-    // One of L1's own Table 17 tones (150Hz), used purely as a
+    static constexpr double kSilentPeriodSeconds = 0.075;   // 75ms, the spec's own minimum/nominal
+    static constexpr double kReversalHoldSeconds = 0.010;   // "transmitted for Xms after the reversal"
+    static constexpr double kAnswerMinToneADurationSeconds = 0.050;  // .2.3's "transmitted for at least 50ms"
+    static constexpr double kToneAPreReversal3DelaySeconds = 0.050;  // .2.6's "transmit Tone A for 50ms [then reverse]"
+    static constexpr double kL1DurationSeconds = 0.160;     // 10.1.2.4's fixed L1 duration
+    static constexpr double kL2ReceiveCapSeconds = 0.500;   // .1.5/.2.8's receiver-side L2 cap
+    static constexpr double kL2LocalEchoCapSeconds = 0.550; // .1.6/.2.5's sender-side cap, see class comment
+    static constexpr float kTonePresenceThreshold = 0.25f;  // relative to nominalAmplitude_
+    // One of L1/L2's own Table 17 tones (150Hz), used purely as a
     // presence beacon on the RX side -- not a channel-response
-    // measurement of any kind, just "has L1 started arriving yet".
+    // measurement of any kind, just "has L1/L2 started arriving yet"
+    // (L1 and L2 are the identical 21-tone set at different power
+    // levels, so this beacon can't and doesn't distinguish them).
     static constexpr double kL1PresenceBeaconHz = 150.0;
+
+    // Named phases purely for RX/TX dispatch clarity -- the detailed
+    // per-event scheduling within each phase still uses the same
+    // absolute-sample event-splitting fields/style as the rest of
+    // this class, not a separate state machine of its own.
+    enum class CallDcePhase {
+        AwaitingInfo0a,
+        AwaitingFirstToneAReversal,
+        AwaitingSecondToneAReversal,
+        ReceivingL1,
+        ReceivingL2,
+        SendingToneBAwaitingThirdToneAReversal,
+        SendingOwnL1L2AwaitingToneAPresence,
+        SendingInfo1cAwaitingInfo1a,
+        Phase2Complete,
+    };
+    enum class AnswerDcePhase {
+        AwaitingInfo0c,
+        AwaitingToneBPresence,
+        AwaitingFirstToneBReversal,
+        SendingOwnL1L2AwaitingToneBPresence2,
+        SendingThirdToneAAwaitingSecondToneBReversal,
+        ReceivingL1,
+        ReceivingL2,
+        SendingToneAAwaitingInfo1c,
+        Phase2Complete,
+    };
 
     void ProcessCallDceFrame(const std::vector<Sample>& rxSamples, std::vector<Sample>& txSamplesOut,
                               int frameSampleCount);
     void ProcessAnswerDceFrame(const std::vector<Sample>& rxSamples, std::vector<Sample>& txSamplesOut,
                                 int frameSampleCount);
 
-    // Generates `sampleCount` samples of the call DCE's Tone B output,
-    // splitting the chunk at the exact sample its scheduled reversal
-    // (11.2.1.1.3) is due if that falls within this chunk, applying it,
-    // holding for kReversalHoldSeconds, then falling silent.
     void GenerateCallDceToneB(std::vector<Sample>& out, int sampleCount);
-
-    // Generates `sampleCount` samples of the answer DCE's Tone A
-    // output. Unlike the call DCE's single reversal, this handles TWO
-    // sequential reversal events on the same continuous generator: the
-    // first (11.2.1.2.3) has no hold/silence afterward -- Tone A just
-    // continues, reversed, until the second -- while the second
-    // (11.2.1.2.5) does hold then fall silent, same shape as the call
-    // DCE's.
-    // Called once secondReversalHoldDone_ first becomes true: emits
-    // L1 for its fixed 160ms, then falls silent (L2 deliberately not
-    // implemented -- see class comment). Shares GenerateAnswerDceToneA's
-    // absolute-sample event-splitting style.
     void GenerateAnswerDceToneA(std::vector<Sample>& out, int sampleCount);
-
-    // Drains pendingInfo0cTx_/pendingInfo0aTx_ first, then falls back
-    // to the live Tone B/Tone A generator for however many samples are
-    // left in this chunk once the queue runs dry.
     void GenerateCallDceTxChunk(std::vector<Sample>& out, int sampleCount);
     void GenerateAnswerDceTxChunk(std::vector<Sample>& out, int sampleCount);
+
+    // L1/L2 presence tracking shared shape (one instance of this logic
+    // runs on the call side watching for the answer's L1/L2, another
+    // independent instance runs on the answer side watching for the
+    // call's L1/L2 -- both just Goertzel presence checks at 150Hz).
+    struct L1L2PresenceTracker {
+        GoertzelDetector detector;
+        bool presenceDetected = false;
+        long long detectionStartAbs = 0;
+        bool l1Done = false;
+
+        explicit L1L2PresenceTracker(int sampleRateHz) : detector(kL1PresenceBeaconHz, sampleRateHz) {}
+    };
 
     static void FillSilence(std::vector<Sample>& out, int frameSampleCount);
 
@@ -156,9 +187,12 @@ private:
     long long silenceSamplesRemaining_;
     std::optional<V34Info0> remoteInfo0_;
     double roundTripDelaySeconds_ = 0.0;
+    std::optional<V34Info1c> remoteInfo1c_;
+    std::optional<V34Info1a> remoteInfo1a_;
 
-    // Own-reversal scheduling, shared shape for both roles (only one
-    // role's generator fields below are ever actually used).
+    // Own-reversal scheduling for the FIRST reversal exchange, shared
+    // shape for both roles (only one role's generator fields below are
+    // ever actually used for it).
     bool ownReversalScheduled_ = false;
     long long ownReversalScheduledAbs_ = 0;
     bool ownReversalApplied_ = false;
@@ -166,30 +200,46 @@ private:
     bool postReversalHoldDone_ = false;
 
     // Call DCE state
+    CallDcePhase callPhase_ = CallDcePhase::AwaitingInfo0a;
     std::deque<Sample> pendingInfo0cTx_;
     bool info0cTxQueued_ = false;
     StreamingInfo0Receiver info0aReceiver_; // constructed in the .cpp init list (needs sampleRateHz)
-    bool info0aReceived_ = false;
     std::optional<ToneBGenerator> toneBGenerator_;
     std::optional<TonePhaseReversalDetector> toneADetector_;
     long long toneADetectorStartAbs_ = 0; // absolute sample toneADetector_'s own clock 0 corresponds to
     int toneAEventsSeen_ = 0;
-    GoertzelDetector l1PresenceDetector_; // constructed in the .cpp init list (needs sampleRateHz)
-    bool l1PresenceDetected_ = false;
-    long long l1DetectionStartAbs_ = 0;
+    std::optional<L1L2PresenceTracker> callL1L2Tracker_;
     bool l1Received_ = false;
+    // The call DCE's own second Tone B reversal (.1.6), scheduled 40ms
+    // after detecting the THIRD Tone A reversal (toneAEventsSeen_==3).
+    bool ownSecondReversalScheduled_ = false;
+    long long ownSecondReversalScheduledAbs_ = 0;
+    bool ownSecondReversalApplied_ = false;
+    long long ownSecondReversalAppliedAbs_ = 0;
+    bool ownSecondReversalHoldDone_ = false;
+    bool callOwnL1TxStarted_ = false;
+    long long callOwnL1TxEndAbs_ = 0;
+    bool callOwnL2TxStarted_ = false;
+    long long callOwnL2TxStartAbs_ = 0;
+    std::optional<LineProbingSignalGenerator> callL1L2Generator_;
+    GoertzelDetector toneAPresenceDetector_; // constructed in the .cpp init list; answer's plain post-L1/L2 Tone A
+    bool toneAPresenceDetected_ = false;
+    std::deque<Sample> pendingInfo1cTx_;
+    bool info1cTxQueued_ = false;
+    std::optional<StreamingInfo1aReceiver> info1aReceiver_;
 
     // Answer DCE state
+    AnswerDcePhase answerPhase_ = AnswerDcePhase::AwaitingInfo0c;
     std::deque<Sample> pendingInfo0aTx_;
     bool info0aTxQueued_ = false;
     StreamingInfo0Receiver info0cReceiver_; // constructed in the .cpp init list (needs sampleRateHz)
-    bool info0cReceived_ = false;
     std::optional<ToneAGenerator> toneAGenerator_;
     long long toneATxStartedAbs_ = -1;
     GoertzelDetector toneBPresenceDetector_; // constructed in the .cpp init list (needs sampleRateHz)
     bool toneBPresenceDetected_ = false;
     std::optional<TonePhaseReversalDetector> toneBDetector_;
     long long toneBDetectorStartAbs_ = 0; // absolute sample toneBDetector_'s own clock 0 corresponds to
+    int toneBEventsSeen_ = 0;
     bool firstReversalScheduled_ = false; // the .2.3 condition-triggered reversal
     long long firstReversalScheduledAbs_ = 0;
     bool firstReversalApplied_ = false;
@@ -201,7 +251,24 @@ private:
     bool secondReversalHoldDone_ = false;
     bool l1TxStarted_ = false;
     long long l1TxEndAbs_ = 0;
+    bool l2TxStarted_ = false;
+    long long l2TxStartAbs_ = 0;
     std::optional<LineProbingSignalGenerator> l1Generator_;
+    GoertzelDetector toneBPresenceDetector2_; // constructed in the .cpp init list; call's second, plain Tone B
+    bool toneBPresenceDetected2_ = false;
+    // The answer DCE's third Tone A reversal (.2.6): first a fixed
+    // 50ms delay once toneBPresenceDetected2_ (AND the L2-local-echo
+    // condition) fires, then the reversal itself, then a hold, then
+    // silence.
+    bool thirdReversalPending_ = false; // the 50ms pre-delay is running
+    long long thirdReversalScheduledAbs_ = 0;
+    bool thirdReversalApplied_ = false;
+    long long thirdReversalAppliedAbs_ = 0;
+    bool thirdReversalHoldDone_ = false;
+    std::optional<L1L2PresenceTracker> answerL1L2Tracker_;
+    std::deque<Sample> pendingInfo1aTx_;
+    bool info1aTxQueued_ = false;
+    std::optional<StreamingInfo1cReceiver> info1cReceiver_;
 };
 
 } // namespace voipmodem::dsp

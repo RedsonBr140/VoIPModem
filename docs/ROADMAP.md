@@ -779,17 +779,70 @@ effort, not a near-complete one:
   and tracks its 160ms window, exposed via `GetHasReceivedL1()`. 1 new
   test (157 total): both sides run the full exchange and the call DCE
   ends up reporting L1 received.
-  **L2 is deliberately NOT implemented, and this is a real open
-  question, not a difficulty rating.** 11.2.1.1.5/11.2.1.2.6's own
-  wording ties L2's transmission duration to the sender "having
-  received the local echo of L2" -- a real PSTN 2-wire/4-wire
-  hybrid-circuit artifact. This project bridges calls through a
-  digital VoIP path (Asterisk/RTP), which has no such echo in the
-  analog sense; what, if anything, should stand in for it here hasn't
-  been decided. Writing code that pretends an answer exists would be
-  guessing at a requirement, not extracting one from the text, so
-  nothing past L1 has been attempted. (Flagged to the user directly;
-  no decision made yet as of this writing.)
+  **L2 and the entire rest of Phase 2, resolved and implemented
+  (2026-10-19), user delegated the "local echo" decision with one
+  constraint: behave exactly like a real modem would.** Re-derived the
+  FULL event sequence from the numbered clauses (11.2.1.1.1-.8,
+  11.2.1.2.1-.9) rather than guessing: "received the local echo of
+  L2" turns out to be the SENDER's own near-instantaneous, local-only
+  echo of what it's transmitting -- on real hardware this fires at
+  essentially the same instant as "started transmitting" (the
+  local-loop delay is negligible against the spec's own 550ms+RTD
+  budget). Modeled here as satisfied immediately once L2 TX starts,
+  which leaves the OTHER half of each AND'd condition -- detecting the
+  counterpart's tone -- as what actually gates each side in practice,
+  implemented for real with the spec's own 550ms+RTD figure kept as
+  the exact safety cap. This is "behaving like a real modem" in the
+  sense that matters: the real gating behavior (wait for the
+  counterpart, capped by a timeout) is faithfully reproduced; only the
+  physically-unmeasurable near-zero local-loop delay is treated as
+  zero, which is what it would measure as on real hardware too.
+  Once that unblocked the sequencing, `V34Phase2Handshake.h`/`.cpp`
+  were extended to cover the WHOLE error-free procedure: the second
+  Tone A/B reversal exchange, both sides' L1/L2 transmit (now
+  including L2, gated as above) and receive, and the INFO1c/INFO1a
+  exchange that hands off into Phase 3. `V34Phase2Outcome` gained
+  `Phase2Complete`; new `GetRemoteInfo1c()`/`GetRemoteInfo1a()`
+  getters. New `V34Info1.h`/`.cpp` implements clauses 10.1.2.3.4/
+  10.1.2.3.5 (Tables 15/16) -- INFO1c (109 bits) and INFO1a (70 bits),
+  carrying Phase 2's actual *results* (power reduction, pre-emphasis
+  filter, projected data rate per symbol rate, a 10-bit two's-complement
+  1050Hz frequency-offset measurement). `MakeDefaultLocalInfo1c()`/
+  `MakeDefaultLocalInfo1a()` honestly report projected data rate 0
+  ("cannot be used") for the only symbol rate this project ever claims
+  (2400 baud) -- not because any measurement found the line bad, but
+  because this codebase has no trellis encoder, QAM mapper, or
+  adaptive equalizer, so no data rate is achievable regardless of
+  line quality; the frequency-offset field uses the spec's own -512
+  "not measured" sentinel, since no real L1/L2 channel-response
+  analysis exists either. `V34InfoSequence.h`/`.cpp` extended with
+  the matching DBPSK transport (`EncodeInfo1cToSamples`/
+  `EncodeInfo1aToSamples`, `StreamingInfo1cReceiver`/
+  `StreamingInfo1aReceiver`), sharing one `FindAndDecodeFrame<T>`
+  template with `StreamingInfo0Receiver` instead of tripling the
+  search loop.
+  Implementing this surfaced and fixed two real bugs worth recording:
+  (1) `toneADetector_`/`toneBDetector_` (each reused across multiple
+  reversal events over the full procedure) were only fed RX samples
+  during the phases where their events mattered, silently desyncing
+  their internal sample clock from elapsed real time across any
+  frame where they went unfed -- fixed by feeding both unconditionally
+  every frame for as long as they exist, dispatching on event count
+  instead of phase; (2) the answer DCE's Tone A generator was only
+  constructed inside the `AwaitingInfo0c` phase's own TX case, but RX
+  could advance past that phase before TX ever got there, leaving a
+  later phase calling into an empty `optional` -- fixed by draining
+  each side's TX queues unconditionally before the phase switch rather
+  than gating that draining by phase, and by moving the first
+  reversal's scheduling condition into the shared tone-generation
+  function so it keeps getting checked across the phase boundary that
+  used to lose it. Both were caught by two new end-to-end tests
+  (`V34Phase2Handshake_FullLoopback_ReachesPhase2Complete`,
+  `..._WithSimulatedLineDelay_ReachesPhase2Complete`) that run the
+  ENTIRE procedure to `Phase2Complete` on both sides -- including one
+  with a real simulated 100ms round-trip line delay -- not just
+  through the first RTD measurement like the earlier tests did. 188
+  tests total.
   **Wired into `CallAudioBridge`, opt-in only (same day)**: once
   `V8Handshake` reaches `Negotiated` with V34Duplex/V34HalfDuplex
   selected, `CallAudioBridge` now hands the rest of the call's audio
@@ -810,22 +863,24 @@ effort, not a near-complete one:
   step, since it would be the first time any of this phase's V.34 work
   runs against real Asterisk/RTP jitter rather than an idealized
   sample-perfect loopback.
-  Still not implemented: the second Tone A/B reversal exchange that
-  follows L1/L2 (11.2.1.1.6/11.2.1.2.6 onward), this implementation's
-  own L1/L2 channel-response *analysis* (turning received L1/L2 audio
-  into actual distortion/noise measurements -- note this is a
-  separate problem from L2's duration-sequencing one above, and also
-  still open regardless of how that gets resolved), INFO1a/INFO1c
-  (they carry those computed results), the handoff into Phase 3, and
+  **Phase 2 is now implemented end to end for the error-free case --
+  this is the honest ceiling of that claim.** Still not implemented:
+  this implementation's own L1/L2 channel-response *analysis* (turning
+  received L1/L2 audio into the actual distortion/noise measurements
+  INFO1 is supposed to carry -- right now both sides only ever report
+  the honestly-empty defaults above, never a real measurement), and
   all of clause 11.2.2's retry/recovery procedure (the same
   honestly-deferred gap `V8Handshake` itself still has -- nothing here
-  times out or retries if a step never completes either). Only after
-  ALL of that: shell mapping, trellis encoding/Viterbi decoding, QAM
-  constellation mapping, the scrambler/descrambler, carrier recovery,
-  and an adaptive equalizer -- the harder, genuinely multi-month-scale
-  remainder of a real V.34 data-mode modem. None of this has been run
-  over a real call, and no interoperability test against a real V.34
-  modem exists -- per CLAUDE.md, V.34 is NOT claimed as supported.
+  times out or retries if a step never completes; a real line's noise
+  corrupting a frame, not just an idealized loopback, has never been
+  exercised). Only after that: shell mapping, trellis encoding/Viterbi
+  decoding, QAM constellation mapping, the scrambler/descrambler,
+  carrier recovery, and an adaptive equalizer -- the harder, genuinely
+  multi-month-scale remainder of a real V.34 data-mode modem, without
+  which no projected data rate in INFO1 could ever honestly be
+  nonzero regardless of line quality. None of this has been run over a
+  real call, and no interoperability test against a real V.34 modem
+  exists -- per CLAUDE.md, V.34 is NOT claimed as supported.
 - **Hayes ATL/ATM (speaker volume/mode) and local audio monitoring,
   added (2026-10-19), separate from the V.34 work above.** User asked
   how to "hear the modem" the way a real modem's on-board speaker lets

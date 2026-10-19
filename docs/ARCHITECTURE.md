@@ -573,12 +573,29 @@ under a `[Modem...]` section), default false, which also controls
 whether this instance's own V8 menu advertises V34Duplex at all --
 **not enabled by default** because a real V.34-capable remote modem
 would commit to training this codebase can only follow through
-Phase 2's first RTD/L1 exchange (see `docs/ROADMAP.md` Phase 4), likely
-hanging or failing the call instead of gracefully negotiating down to
-V.21. Intended only for a controlled test between two of this
-project's own instances (e.g. the com0com-paired local test rig), never
-on an instance taking real inbound calls. Not yet live-tested over a
-real call with this flag on.
+Phase 2 (see `docs/ROADMAP.md` Phase 4), likely hanging or failing the
+call instead of gracefully negotiating down to V.21. Intended only
+for a controlled test between two of this project's own instances
+(e.g. the com0com-paired local test rig), never on an instance taking
+real inbound calls. Not yet live-tested over a real call with this
+flag on.
+
+**`V34Phase2Handshake` extended to the full error-free Phase 2
+procedure (2026-10-19)**: both Tone A/B reversal exchanges, both
+directions' L1/L2 transmit and receive, and the INFO1c/INFO1a exchange
+that hands off into Phase 3 -- see `docs/ROADMAP.md` Phase 4 for how
+the one genuinely ambiguous piece (L2's sender-side "local echo"
+duration, a PSTN hybrid-circuit concept with no digital-VoIP
+equivalent) was resolved by re-deriving the full event sequence from
+the numbered clauses rather than guessing, and for the two real bugs
+the extension surfaced and fixed (a desynced detector sample-clock
+from inconsistent per-phase feeding; a TX generator referenced before
+construction when RX outran TX across a phase boundary). New
+`V34Info1.h`/`.cpp` codes INFO1c/INFO1a (Tables 15/16); both sides'
+"results" fields are honestly zero/sentinel, since this codebase still
+has no trellis/QAM/equalizer and no real L1/L2 channel-response
+analysis to report. `V34Phase2Outcome::Phase2Complete` is the ceiling
+of what this class now claims.
 
 **Local audio monitoring, "hear the modem" (2026-10-19)**: new
 `src/Lib/Audio/WindowsAudioOutput.h`/`.cpp` wraps winmm's

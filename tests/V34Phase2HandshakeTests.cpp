@@ -98,6 +98,37 @@ bool RunLoopbackUntilL1Received(V34Phase2Handshake& callDce, V34Phase2Handshake&
 
     return callDce.GetHasReceivedL1();
 }
+
+// Same loopback mechanics, but keeps running until BOTH sides report
+// Phase2Complete (the full 11.2.1.1/11.2.1.2 procedure, INFO1a/INFO1c
+// included) or `maxFrames` elapses.
+bool RunLoopbackUntilPhase2Complete(V34Phase2Handshake& callDce, V34Phase2Handshake& answerDce,
+                                      int oneWayDelaySamples, int maxFrames) {
+    DelayLine callToAnswer(oneWayDelaySamples);
+    DelayLine answerToCall(oneWayDelaySamples);
+    std::vector<Sample> callTx;
+    std::vector<Sample> answerTx;
+    const std::vector<Sample> silence(static_cast<size_t>(kFrameSampleCount), 0.0f);
+
+    callDce.ProcessFrame(silence, callTx, kFrameSampleCount);
+    answerDce.ProcessFrame(silence, answerTx, kFrameSampleCount);
+
+    for (int frame = 0; frame < maxFrames; ++frame) {
+        if (callDce.GetOutcome() == V34Phase2Outcome::Phase2Complete &&
+            answerDce.GetOutcome() == V34Phase2Outcome::Phase2Complete) {
+            return true;
+        }
+
+        const std::vector<Sample> rxForCallDce = answerToCall.Push(answerTx);
+        const std::vector<Sample> rxForAnswerDce = callToAnswer.Push(callTx);
+
+        callDce.ProcessFrame(rxForCallDce, callTx, kFrameSampleCount);
+        answerDce.ProcessFrame(rxForAnswerDce, answerTx, kFrameSampleCount);
+    }
+
+    return callDce.GetOutcome() == V34Phase2Outcome::Phase2Complete &&
+           answerDce.GetOutcome() == V34Phase2Outcome::Phase2Complete;
+}
 } // namespace
 
 TEST(V34Phase2Handshake_FullLoopback_BothSidesMeasureRoundTripDelay) {
@@ -174,4 +205,54 @@ TEST(V34Phase2Handshake_AfterRtdMeasured_CallDceReceivesL1) {
 
     EXPECT_TRUE(received);
     EXPECT_TRUE(callDce.GetHasReceivedL1());
+}
+
+// The big one: runs the ENTIRE error-free Phase 2 procedure on both
+// sides, start to finish -- both Tone A/B reversal exchanges and their
+// RTD calculations, both L1/L2 probing exchanges, and the INFO1c/INFO1a
+// exchange that hands off into Phase 3. This is what makes
+// "implements through INFO1a/INFO1c" an exercised claim, not a hoped
+// one.
+TEST(V34Phase2Handshake_FullLoopback_ReachesPhase2Complete) {
+    Logger logger;
+    TaggedLogger callLogger(logger, "CallDceFullTest");
+    TaggedLogger answerLogger(logger, "AnswerDceFullTest");
+
+    V34Phase2Handshake callDce(V34Phase2Handshake::Role::CallDce, kNominalAmplitude, callLogger);
+    V34Phase2Handshake answerDce(V34Phase2Handshake::Role::AnswerDce, kNominalAmplitude, answerLogger);
+
+    const bool completed =
+        RunLoopbackUntilPhase2Complete(callDce, answerDce, /*oneWayDelaySamples=*/0, /*maxFrames=*/3000);
+
+    EXPECT_TRUE(completed);
+    EXPECT_TRUE(callDce.GetOutcome() == V34Phase2Outcome::Phase2Complete);
+    EXPECT_TRUE(answerDce.GetOutcome() == V34Phase2Outcome::Phase2Complete);
+    EXPECT_TRUE(callDce.GetHasReceivedL1());
+
+    // Answer DCE received the call DCE's INFO1c; call DCE received the
+    // answer DCE's INFO1a.
+    EXPECT_TRUE(answerDce.GetRemoteInfo1c().has_value());
+    EXPECT_TRUE(callDce.GetRemoteInfo1a().has_value());
+    if (answerDce.GetRemoteInfo1c().has_value()) {
+        // Honestly 0 -- see V34Info1.h's class comment. Confirms the
+        // default (not some other, accidentally-nonzero) value made it
+        // all the way across.
+        EXPECT_EQ(static_cast<int>(answerDce.GetRemoteInfo1c()->rate2400.projectedDataRateMultiplier), 0);
+    }
+}
+
+TEST(V34Phase2Handshake_WithSimulatedLineDelay_ReachesPhase2Complete) {
+    Logger logger;
+    TaggedLogger callLogger(logger, "CallDceFullDelayTest");
+    TaggedLogger answerLogger(logger, "AnswerDceFullDelayTest");
+
+    V34Phase2Handshake callDce(V34Phase2Handshake::Role::CallDce, kNominalAmplitude, callLogger);
+    V34Phase2Handshake answerDce(V34Phase2Handshake::Role::AnswerDce, kNominalAmplitude, answerLogger);
+
+    const bool completed =
+        RunLoopbackUntilPhase2Complete(callDce, answerDce, /*oneWayDelaySamples=*/400, /*maxFrames=*/4000);
+
+    EXPECT_TRUE(completed);
+    EXPECT_TRUE(callDce.GetOutcome() == V34Phase2Outcome::Phase2Complete);
+    EXPECT_TRUE(answerDce.GetOutcome() == V34Phase2Outcome::Phase2Complete);
 }
