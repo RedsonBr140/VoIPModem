@@ -85,6 +85,7 @@ ExecutionOutcome ModemStateMachine::Execute(const AtParseResult& parsed) {
 
             case AtCommandType::Dial: {
                 state_ = ModemState::Dialing;
+                lastDialedNumber_ = cmd.stringParam;
                 logger_.Info("ATD" + std::string(cmd.dialMode == AtDialMode::Tone ? "T" :
                                                    cmd.dialMode == AtDialMode::Pulse ? "P" : "") +
                              " dialing '" + cmd.stringParam + "'");

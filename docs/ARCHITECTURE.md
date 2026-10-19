@@ -604,6 +604,21 @@ values are stored but not read back by the audio monitor (see
 `docs/ROADMAP.md` Phase 4 for the honest gap, including why closing it
 means crossing the Core/SIP boundary).
 
+**Live-tested with an actual human ear (2026-10-19)**: user confirmed
+the V.8 handshake audio sounds clean over the local test rig with
+`EnableLocalAudio=1` on one line, then flagged the one real gap: no
+dial tone/dialing sound before a call connects, since there's no
+physical analog line to produce either from. Added as a deliberately
+mocked local cue: new `src/Lib/Dsp/DtmfGenerator.h`/`.cpp` generates
+the classic 350+440Hz dial tone and standard-frequency-pair DTMF
+digits; `ModemInstance` watches for the transition into
+`ModemState::Dialing`, and (if `enableLocalAudio`) plays dial tone
+then each digit's DTMF tone on its own `WindowsAudioOutput`, on a
+short-lived background thread so the serial-read/call-event loop
+isn't blocked for the ~1-3 second sequence. Purely cosmetic -- dialing
+itself already happens via the SIP INVITE, not DTMF, so none of this
+reaches the far end.
+
 **Real symbol-timing recovery implemented in `FskDemodulator`
 (2026-10-18)**: an early-late gate (re-measuring each decided bit's
 winning tone in windows shifted slightly earlier/later than where it

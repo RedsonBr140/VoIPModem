@@ -875,11 +875,38 @@ effort, not a near-complete one:
   `ModemStateMachine`, the audio itself flows through
   `CallAudioBridge`, a layer apart) -- not attempted yet, and ATM's
   "on until carrier detected" semantics would also need real call-state
-  awareness this class doesn't have. Also not yet live-tested with an
-  actual human ear -- `waveOutOpen` either succeeds or silently leaves
-  `IsAvailable() == false` (Write() becomes a no-op) if this machine
-  has no usable output device, and nothing has confirmed yet which case
-  applies here.
+  awareness this class doesn't have.
+  **Live-tested with an actual human ear (2026-10-19)**: user confirmed
+  the V.8 handshake audio (ANSam/CM/JM/CJ) sounds "clean, exactly as
+  I'd expect it to be" over the local two-instance test rig with
+  `EnableLocalAudio=1` on one line. The one gap the user flagged
+  listening to it: no dial tone or dialing sound before/during a call
+  -- expected, since there's no physical analog line to produce either
+  from, and explicitly called out by the user as something to "mock."
+- **Dial tone + DTMF dialing sound, mocked (2026-10-19).** New
+  `src/Lib/Dsp/DtmfGenerator.h`/`.cpp`: `GenerateDialTone()` (the
+  classic North American 350+440Hz continuous dial tone) and
+  `GenerateDtmfDigit()` (standard ITU-T Q.23/Bell System 503 DTMF
+  frequency pairs -- row 697/770/852/941Hz, column
+  1209/1336/1477/1633Hz), both built on the shared `Dds` oscillator, 6
+  new tests (173 total) including Goertzel-verified frequency-pair
+  correctness per digit. Purely cosmetic: this codebase already dials
+  by putting the number straight into the SIP INVITE
+  (`ICallController::Dial`), so none of this is sent anywhere or
+  affects real call routing -- it only exists for a human listening
+  locally. `ModemStateMachine` now exposes `LastDialedNumber()` (1 more
+  test, 174 total); `ModemInstance` watches for the transition into
+  `ModemState::Dialing` each loop iteration and, if
+  `enableLocalAudio` is set, spawns a short-lived background thread
+  (`PlayDialSequence`) that writes 1s of dial tone then each digit's
+  DTMF tone (80ms on, 80ms gap) to its own `WindowsAudioOutput`
+  instance, paced with real-time sleeps between writes so the digits
+  are heard distinctly rather than dumped as one blob. Polls
+  `stopRequested_` between digits so `Stop()` isn't blocked for the
+  sequence's full ~1-3 second duration; a redial before a previous
+  sequence finishes joins it first rather than overlapping two
+  sequences on the same output. Not yet live-tested with an actual
+  human ear (the V.8/V.34 audio above has been; this hasn't yet).
 - Any interoperability test against a real modem, physical or
   software — nothing in this phase has been claimed as "working" per
   CLAUDE.md's rule against claiming standard support without

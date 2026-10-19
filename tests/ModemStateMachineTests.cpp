@@ -9,6 +9,7 @@ using voipmodem::AtCommandParser;
 using voipmodem::CallEvent;
 using voipmodem::CallEventType;
 using voipmodem::Logger;
+using voipmodem::ModemState;
 using voipmodem::ModemStateMachine;
 using voipmodem::ResultCode;
 using voipmodem::TaggedLogger;
@@ -115,6 +116,17 @@ TEST(Dial_HasNoImmediateResult) {
     const auto outcome = core.Execute(AtCommandParser::Parse("ATD5551234"));
     EXPECT_TRUE(!outcome.hasResult);
     EXPECT_EQ(controller.lastDialedNumber, std::string("5551234"));
+}
+
+TEST(Dial_ExposesLastDialedNumber_WithToneModifierStripped) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    core.Execute(AtCommandParser::Parse("ATDT5551234"));
+    EXPECT_EQ(core.LastDialedNumber(), std::string("5551234"));
+    EXPECT_TRUE(core.CurrentState() == ModemState::Dialing);
 }
 
 TEST(DialThenPollEvent_ReportsControllerOutcomeAsResultCode) {

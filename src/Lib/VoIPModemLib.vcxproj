@@ -92,6 +92,7 @@
     <ClInclude Include="Dsp\V34RoundTripDelay.h" />
     <ClInclude Include="Dsp\LineProbingSignalGenerator.h" />
     <ClInclude Include="Dsp\V34Phase2Handshake.h" />
+    <ClInclude Include="Dsp\DtmfGenerator.h" />
     <ClInclude Include="Hayes\AtCommand.h" />
     <ClInclude Include="Hayes\AtCommandParser.h" />
     <ClInclude Include="Serial\ISerialPort.h" />
@@ -128,6 +129,7 @@
     <ClCompile Include="Dsp\V34RoundTripDelay.cpp" />
     <ClCompile Include="Dsp\LineProbingSignalGenerator.cpp" />
     <ClCompile Include="Dsp\V34Phase2Handshake.cpp" />
+    <ClCompile Include="Dsp\DtmfGenerator.cpp" />
     <ClCompile Include="Hayes\AtCommandParser.cpp" />
     <ClCompile Include="Serial\WindowsSerialPort.cpp" />
     <ClCompile Include="Config\AppConfig.cpp" />

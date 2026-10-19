@@ -62,6 +62,14 @@ public:
     const ModemProfile& Profile() const { return profile_; }
     const SRegisters& Registers() const { return registers_; }
 
+    // The digits/number most recently passed to ATD, with any T/P
+    // dial-mode modifier already stripped (same string handed to
+    // ICallController::Dial()). Valid once CurrentState() ==
+    // ModemState::Dialing; used by ModemInstance to know what to play
+    // as a local DTMF dialing sound (see docs/ROADMAP.md Phase 4) --
+    // purely cosmetic, not re-sent anywhere.
+    const std::string& LastDialedNumber() const { return lastDialedNumber_; }
+
 private:
     ExecutionOutcome ExecuteExtendedCommand(const AtCommand& cmd) const;
 
@@ -72,6 +80,7 @@ private:
     ModemProfile profile_;
     SRegisters registers_;
     bool hasIncomingCall_ = false;
+    std::string lastDialedNumber_;
 };
 
 } // namespace voipmodem

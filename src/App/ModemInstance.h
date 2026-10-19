@@ -3,9 +3,12 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <optional>
+#include <string>
 #include <thread>
 
 #include "CommandLineSession.h"
+#include "../Lib/Audio/WindowsAudioOutput.h"
 #include "../Lib/Config/AppConfig.h"
 #include "../Lib/Core/ICallController.h"
 #include "../Lib/Core/ModemStateMachine.h"
@@ -51,6 +54,18 @@ private:
     void RunLoop();
     void PollCallEvents();
     void PumpIncomingCallRinging();
+    void PumpDialAudioTrigger();
+
+    // Plays a dial tone followed by each digit of `number` as a DTMF
+    // tone, purely a local cosmetic cue for a human listening via
+    // `dialAudio_` -- there's no physical line to produce a real dial
+    // tone/dialing sidetone from, and nothing here is sent anywhere
+    // (the actual dial already happened via ICallController::Dial by
+    // the time this runs). Runs on `dialAudioThread_`, polling
+    // `stopRequested_` between each tone so Stop() isn't blocked for
+    // the sequence's full ~1-3 second duration. See docs/ROADMAP.md
+    // Phase 4.
+    void PlayDialSequence(std::string number);
 
     ModemInstanceConfig config_;
     TaggedLogger logger_;
@@ -68,6 +83,13 @@ private:
     std::chrono::steady_clock::time_point lastRingAt_{};
     int ringCount_ = 0;
     static constexpr std::chrono::milliseconds kRingInterval{3000};
+
+    // Local dial-tone/DTMF cue (see PlayDialSequence). Only constructed
+    // if config_.enableLocalAudio -- same per-line opt-in flag as
+    // CallAudioBridge's own local speaker monitor.
+    std::optional<WindowsAudioOutput> dialAudio_;
+    std::thread dialAudioThread_;
+    ModemState lastObservedState_ = ModemState::CommandMode;
 };
 
 } // namespace voipmodem
