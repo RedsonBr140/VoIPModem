@@ -725,19 +725,67 @@ effort, not a near-complete one:
   **Nothing above produces a round-trip-delay estimate from a live
   call yet** -- `V34RoundTripDelay` only does arithmetic on sample
   indices a caller already has in hand. 151 tests total.
-  Not yet done, in rough order: the Phase 2 sequencing/timing/retry
-  state machine (11.2) that actually drives `ToneAGenerator`/
-  `ToneBGenerator`/`TonePhaseReversalDetector`/`V34RoundTripDelay`/
-  `LineProbingSignalGenerator`/`V34InfoSequence` against each other in
-  real time to produce a real RTD estimate from a live call, INFO1a/
-  INFO1c (they carry *computed* line-probing results -- this
-  implementation's own L1/L2 channel-response *analysis*, turning
-  received L1/L2 audio into the actual distortion/noise measurements
-  INFO1 reports, also doesn't exist yet), and only after all of that:
-  shell mapping, trellis encoding/Viterbi decoding, QAM constellation
-  mapping, the scrambler/descrambler, carrier recovery, and an adaptive
-  equalizer -- the harder, genuinely multi-month-scale remainder of a
-  real V.34 data-mode modem, honestly not close yet.
+  **Phase 2 state machine added (same day): first real RTD measurement
+  from simulated live call audio.** New `V34Phase2Handshake.h`/`.cpp`
+  drives one side (call or answer DCE) of clause 11.2's actual
+  sequencing/timing procedure across real frame-by-frame audio -- same
+  `ProcessFrame` architecture as `V8Handshake`, reusing its
+  lazily-construct-the-detector-at-the-decision-point pattern. Also
+  added: `StreamingInfo0Receiver` (`V34InfoSequence.h`/`.cpp`) -- the
+  streaming counterpart `DecodeInfo0FromSamples` was missing, searching
+  a growing demodulated bitstream for INFO0's frame sync via
+  `V8Signal::FindBitPattern` reused directly rather than reinvented.
+  Honestly scoped to 11.2.1.1.1-.4 (call modem) and 11.2.1.2.1-.5
+  (answer modem): the INFO0 exchange and the first full Tone A/Tone B
+  reversal exchange that produces each side's own RTDEc/RTDEa. The
+  answer side implements through .2.5, one step further than its own
+  RTD calculation (.2.4), because the call side's *second* Tone A
+  reversal (needed for .1.4) is the answer side's own .2.5 action --
+  both sides' RTD calculations are two sides of the same two
+  40ms-delayed reversal "echoes" sent in direct response to each other.
+  3 new tests (156 total): both sides reach a measured RTD and learn
+  each other's INFO0 over a zero-extra-delay loopback, and -- the one
+  that actually exercises the arithmetic -- both sides compute a sane
+  RTD close to a deliberately-injected, non-trivial simulated line
+  delay (50ms each way, via a small per-direction FIFO `DelayLine`).
+  That last test's first attempt failed by exactly one frame's worth
+  of round-trip time (40ms) -- not an implementation bug, but a wrong
+  expected-value formula in the test itself: this synchronous-loopback
+  harness has its own inherent one-frame latency (side A's TX from
+  iteration N only reaches side B's RX at iteration N+1), on top of
+  whatever's explicitly injected, the same way any real framed-audio
+  pipeline has a floor on round-trip latency -- fixed by accounting
+  for that in the test's expected value, not by loosening the
+  implementation.
+  Two honest simplifications, documented in the class's own header:
+  (1) this implementation restarts each side's Tone A/B generator at
+  phase 0 when TX switches from DBPSK (INFO0) to a plain tone, where a
+  real analog modem's transmitter keeps one continuous-phase carrier
+  through that transition -- harmless here since
+  `TonePhaseReversalDetector` only ever judges *relative* phase change,
+  but not literally the same signal a real modem would put on the
+  line; (2) the RX switch from decoding INFO0 to watching for a tone
+  reversal happens on a whole-frame boundary, not the exact sample
+  INFO0 finished arriving -- costs the detector's baseline-capture
+  window a slightly later start, not an error in any RTD value actually
+  computed.
+  **Still not implemented, and this is the honest remaining size of
+  it**: everything from 11.2.1.1.5/11.2.1.2.6 onward -- the actual
+  L1/L2 send-and-receive exchange (`LineProbingSignalGenerator` exists
+  and is ready, this class just doesn't call it yet), this
+  implementation's own L1/L2 channel-response *analysis* (turning
+  received L1/L2 audio into actual distortion/noise measurements),
+  INFO1a/INFO1c (they carry those computed results), the handoff into
+  Phase 3, and all of clause 11.2.2's retry/recovery procedure (the
+  same honestly-deferred gap `V8Handshake` itself still has -- nothing
+  here times out or retries if a step never completes either). Only
+  after ALL of that: shell mapping, trellis encoding/Viterbi decoding,
+  QAM constellation mapping, the scrambler/descrambler, carrier
+  recovery, and an adaptive equalizer -- the harder, genuinely
+  multi-month-scale remainder of a real V.34 data-mode modem. None of
+  this has been run over a real call, and no interoperability test
+  against a real V.34 modem exists -- per CLAUDE.md, V.34 is NOT
+  claimed as supported.
 - Any interoperability test against a real modem, physical or
   software — nothing in this phase has been claimed as "working" per
   CLAUDE.md's rule against claiming standard support without

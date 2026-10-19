@@ -3,6 +3,7 @@
 #include <optional>
 #include <vector>
 
+#include "DbpskDemodulator.h"
 #include "DspTypes.h"
 #include "V34Info0.h"
 
@@ -43,5 +44,32 @@ void EncodeInfo0ToSamples(const V34Info0& info, double carrierHz, std::vector<Sa
 // wasn't a correctly-received INFO0 sequence," not distinguished further.
 std::optional<V34Info0> DecodeInfo0FromSamples(const std::vector<Sample>& samples, double carrierHz,
                                                 int sampleRateHz = kSampleRateHz);
+
+// Streaming counterpart to DecodeInfo0FromSamples, for a real call's
+// live audio arriving frame by frame with no foreknowledge of frame
+// alignment: feeds audio incrementally (its internal DbpskDemodulator
+// carries bit-boundary state across calls, same as always) and
+// searches the growing demodulated bitstream for a complete, valid
+// INFO0 frame (frame sync + CRC both matching) at any bit offset --
+// the same "demodulate continuously, search for the known pattern from
+// a monotonically-advancing resume point" technique V8Handshake's
+// ReceiveMenu/V8Signal::FindBitPattern already use for CM/JM. Returns
+// the decoded V34Info0 the first time a valid frame is found; nullopt
+// on every call before that. A frame-sync match whose CRC doesn't
+// check out is assumed to be an ordinary false positive on data bits,
+// not a corrupted real frame -- this does not implement 11.2.2's
+// recovery procedure for a genuinely corrupted INFO0 arriving
+// repeatedly.
+class StreamingInfo0Receiver {
+public:
+    explicit StreamingInfo0Receiver(double carrierHz, int sampleRateHz = kSampleRateHz);
+
+    std::optional<V34Info0> ProcessSamples(const std::vector<Sample>& samples);
+
+private:
+    DbpskDemodulator demodulator_;
+    std::vector<bool> bits_;
+    size_t searchResumeIndex_ = 0;
+};
 
 } // namespace voipmodem::dsp

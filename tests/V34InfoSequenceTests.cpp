@@ -71,6 +71,40 @@ TEST(V34InfoSequence_Decode_WrongCarrier_FailsToRoundTrip) {
     EXPECT_TRUE(!decoded.has_value());
 }
 
+TEST(StreamingInfo0Receiver_ChunkedAudioWithLeadingSilence_DecodesCorrectly) {
+    // Real call audio: the receiver is armed well before the other
+    // side actually starts transmitting, and frames don't line up with
+    // the sequence's own boundaries.
+    const V34Info0 original = MakeDefaultLocalInfo0();
+    std::vector<Sample> samples(200, 0.0f); // leading silence
+    EncodeInfo0ToSamples(original, kAnswerModemInfoCarrierHz, samples);
+    samples.insert(samples.end(), 100, 0.0f); // trailing silence too
+
+    StreamingInfo0Receiver receiver(kAnswerModemInfoCarrierHz);
+    std::optional<V34Info0> decoded;
+    const size_t kFrameSize = 160;
+    for (size_t offset = 0; offset < samples.size() && !decoded.has_value(); offset += kFrameSize) {
+        const size_t end = std::min(offset + kFrameSize, samples.size());
+        const std::vector<Sample> chunk(samples.begin() + static_cast<long>(offset),
+                                         samples.begin() + static_cast<long>(end));
+        decoded = receiver.ProcessSamples(chunk);
+    }
+
+    EXPECT_TRUE(decoded.has_value());
+    if (decoded.has_value()) {
+        EXPECT_TRUE(!decoded->cmeModem);
+        EXPECT_EQ(static_cast<int>(decoded->transmitClockSource), 0);
+    }
+}
+
+TEST(StreamingInfo0Receiver_NoSignalYet_ReportsNulloptRepeatedly) {
+    StreamingInfo0Receiver receiver(kAnswerModemInfoCarrierHz);
+    const std::vector<Sample> silence(1600, 0.0f);
+    for (int i = 0; i < 5; ++i) {
+        EXPECT_TRUE(!receiver.ProcessSamples(silence).has_value());
+    }
+}
+
 TEST(V34InfoSequence_Decode_TruncatedAudio_ReturnsNullopt) {
     const V34Info0 original = MakeDefaultLocalInfo0();
 
