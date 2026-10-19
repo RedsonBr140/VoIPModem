@@ -606,9 +606,26 @@ effort, not a near-complete one:
   same separation `ToneGenerator`/`AnsamTone` keep from `FskModulator`),
   and with no symbol-timing recovery of its own yet (a new primitive,
   doesn't inherit `FskDemodulator`'s early-late gate automatically).
-  Not yet done, in rough order: wiring `V34Info0` through
-  `DbpskModulator`/`DbpskDemodulator` to actually transmit/receive a
-  real INFO0 sequence end to end, INFO1a/INFO1c (they carry *computed*
+  **INFO0 wired end-to-end through DBPSK (same day)**: new
+  `V34InfoSequence.h`/`.cpp` glues `V34Info0`'s bit codec to
+  `DbpskModulator`/`DbpskDemodulator` — `EncodeInfo0ToSamples()` emits
+  a real reference symbol plus the 49 data bits as actual audio
+  samples at a caller-supplied carrier, `DecodeInfo0FromSamples()`
+  reverses it (single-shot, not streaming, since INFO0 is always
+  exactly 49 bits — no reason to decode it incrementally). The
+  2400Hz-answer/1200Hz-call carrier split from 10.1.2.3.1 is exposed as
+  `kAnswerModemInfoCarrierHz`/`kCallModemInfoCarrierHz` constants, but
+  *choosing* which one applies, mixing in the guard tone, and anything
+  about Phase 2 sequencing stay a `CallAudioBridge`/Phase-2 concern,
+  same separation as everywhere else in this stack. 4 new tests (128
+  total): round-trip through each carrier (default-local and
+  all-fields-set `V34Info0` values), confirmation that decoding with
+  the *wrong* carrier correctly fails (proving the carrier split
+  actually matters, not just cosmetic), and a truncated-audio-buffer
+  rejection. Still not wired into `CallAudioBridge`/`V8Handshake`
+  themselves, and still inherits DBPSK's own lack of symbol-timing
+  recovery.
+  Not yet done, in rough order: INFO1a/INFO1c (they carry *computed*
   line-probing results this codebase can't produce yet), Tone A/Tone B
   generation and phase-reversal detection, the actual L1/L2 multitone
   probe signals and their channel-response analysis, round-trip-delay
