@@ -625,12 +625,48 @@ effort, not a near-complete one:
   rejection. Still not wired into `CallAudioBridge`/`V8Handshake`
   themselves, and still inherits DBPSK's own lack of symbol-timing
   recovery.
-  Not yet done, in rough order: INFO1a/INFO1c (they carry *computed*
-  line-probing results this codebase can't produce yet), Tone A/Tone B
-  generation and phase-reversal detection, the actual L1/L2 multitone
-  probe signals and their channel-response analysis, round-trip-delay
-  measurement, and the Phase 2 procedure's sequencing/timing/retry
-  rules (11.2) that tie all of the above together. Then: shell mapping,
+  **Tone A/Tone B generation added (same day)**: new
+  `V34ProbingTones.h`/`.cpp` implements 10.1.2.1 (Tone A, 2400Hz,
+  answer modem, 1dB below nominal power, plus a continuous 1800Hz
+  guard tone at full nominal power that never reverses) and 10.1.2.2
+  (Tone B, 1200Hz, call modem, no guard tone specified in that clause's
+  text) confirmed against the real Recommendation text re-fetched for
+  this increment (same `pdftotext` approach, see below). Both tones
+  reuse `Dds::AddPhase()` for their 180-degree reversals, the same
+  mechanism `DbpskModulator` already uses. 7 new tests (135 total),
+  verifying: constant frequency/amplitude with no reversal, a
+  `ReversePhase()` call actually flips a local I/Q correlator's sign
+  (the same differential check `DbpskDemodulator` relies on, just done
+  directly in the test since no detector exists yet), two reversals
+  cancelling back to the original phase, Tone A's -1dB/nominal
+  amplitude ratio against its guard tone, that reversing Tone A's phase
+  leaves the guard tone's phase alone, and that Tone B has no 1800Hz
+  guard-tone energy at all.
+  Generation only, deliberately -- same split kept for
+  `FskModulator`/`FskDemodulator` and `DbpskModulator`/
+  `DbpskDemodulator` before them. Still NOT done, and genuinely harder
+  than generation: *detecting* a phase reversal in a live incoming
+  tone and measuring exactly *when* it happened (round-trip-delay
+  measurement is nothing but that timestamp, per 11.2.1.1/11.2.1.2's
+  "minus 40 ms" arithmetic -- so a sloppy detector directly produces a
+  wrong RTD estimate, not just a slightly-late bit decision the way a
+  symbol-clocked demodulator can tolerate). Re-read clause 11.2 in full
+  for this increment (its PDF, freely downloadable from itu.int, same
+  UBC-hosted mirror copy used earlier this phase, converted via
+  `pdftotext`) to confirm the exact sequencing before touching it next:
+  the 75ms silent Phase-1-ending period, each side's INFO0/Tone
+  send-then-detect ordering, the 40ms±1ms reversal-echo delay rule
+  used symmetrically by both sides, the 10ms post-reversal hold, and
+  each side's own retry/timeout fallbacks (11.2.2) -- none of that
+  state machine is implemented yet, nor is round-trip-delay
+  measurement itself.
+  Not yet done, in rough order: a phase-reversal detector with
+  real timing-accuracy guarantees (needed before round-trip-delay
+  measurement means anything), INFO1a/INFO1c (they carry *computed*
+  line-probing results this codebase can't produce yet), the actual
+  L1/L2 multitone probe signals and their channel-response analysis,
+  and the Phase 2 procedure's sequencing/timing/retry state machine
+  (11.2) that ties all of the above together. Then: shell mapping,
   trellis encoding and Viterbi decoding, rate negotiation.
 - Any interoperability test against a real modem, physical or
   software — nothing in this phase has been claimed as "working" per

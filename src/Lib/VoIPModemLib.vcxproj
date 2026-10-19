@@ -86,6 +86,7 @@
     <ClInclude Include="Dsp\DbpskModulator.h" />
     <ClInclude Include="Dsp\DbpskDemodulator.h" />
     <ClInclude Include="Dsp\V34InfoSequence.h" />
+    <ClInclude Include="Dsp\V34ProbingTones.h" />
     <ClInclude Include="Hayes\AtCommand.h" />
     <ClInclude Include="Hayes\AtCommandParser.h" />
     <ClInclude Include="Serial\ISerialPort.h" />
@@ -116,6 +117,7 @@
     <ClCompile Include="Dsp\DbpskModulator.cpp" />
     <ClCompile Include="Dsp\DbpskDemodulator.cpp" />
     <ClCompile Include="Dsp\V34InfoSequence.cpp" />
+    <ClCompile Include="Dsp\V34ProbingTones.cpp" />
     <ClCompile Include="Hayes\AtCommandParser.cpp" />
     <ClCompile Include="Serial\WindowsSerialPort.cpp" />
     <ClCompile Include="Config\AppConfig.cpp" />
