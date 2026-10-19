@@ -695,13 +695,49 @@ effort, not a near-complete one:
   11.2.1.1.4/11.2.1.2.4) or to clause 11.2's sequencing/timing/retry
   procedure that decides when to listen for which tone, when to send a
   reversal of its own, and what to do if nothing is detected in time.
-  Not yet done, in rough order: the actual round-trip-delay
-  calculation built on top of this detector, INFO1a/INFO1c (they carry
-  *computed* line-probing results this codebase still can't produce),
-  the actual L1/L2 multitone probe signals and their channel-response
-  analysis, and the Phase 2 procedure's full sequencing/timing/retry
-  state machine (11.2) that ties all of the above together. Then: shell
-  mapping, trellis encoding and Viterbi decoding, rate negotiation.
+  **RTD calculation and L1/L2 generation added (same day)**: new
+  `V34RoundTripDelay.h`/`.cpp` implements 11.2.1.1.4/11.2.1.2.4's exact
+  arithmetic (interval between two reversal sample-indices, minus the
+  fixed 40ms echo delay) on top of `TonePhaseReversalDetector`'s
+  output -- 4 tests confirming the 40ms subtraction and a non-zero
+  round trip. New `LineProbingSignalGenerator.h`/`.cpp` implements
+  10.1.2.4's L1/L2 multitone probe signals (Table 17's 21 cosines, 150Hz
+  spacing, 150-3750Hz, four frequencies omitted, each at a 0/180-degree
+  initial phase) -- re-extracted from the real Recommendation text in
+  *raw* `pdftotext` mode specifically, because layout mode mangles this
+  particular table's column alignment (same discrepancy already found
+  and resolved this way for the CRC work earlier this phase). Two
+  honest implementation choices, neither spelled out by the text
+  itself and NOT confirmed against a real V.34 modem: (1) equal power
+  per tone, normalized so the 21-tone sum's total average power
+  matches a single reference tone at the given nominal amplitude; (2)
+  correcting for `Dds::NextSample()`'s sin-basis output against
+  Table 17's cos(2*pi*f*t + theta) definition with a constant
+  per-tone +90-degree `AddPhase()` offset -- an easy mistake to miss
+  entirely, since it wouldn't show up in a simple magnitude check at
+  all, only in a receiver doing coherent phase analysis later. 6 tests,
+  including one built specifically to catch that exact sin/cos mistake
+  by checking which of a tone's correlated (I, Q) components carries
+  the energy, not just how much is present; all 21 tones also measured
+  exactly leakage-free, by choosing a 1280-sample (160ms) test block
+  length that happens to be an exact integer number of cycles of every
+  Table 17 frequency at once.
+  **Nothing above produces a round-trip-delay estimate from a live
+  call yet** -- `V34RoundTripDelay` only does arithmetic on sample
+  indices a caller already has in hand. 151 tests total.
+  Not yet done, in rough order: the Phase 2 sequencing/timing/retry
+  state machine (11.2) that actually drives `ToneAGenerator`/
+  `ToneBGenerator`/`TonePhaseReversalDetector`/`V34RoundTripDelay`/
+  `LineProbingSignalGenerator`/`V34InfoSequence` against each other in
+  real time to produce a real RTD estimate from a live call, INFO1a/
+  INFO1c (they carry *computed* line-probing results -- this
+  implementation's own L1/L2 channel-response *analysis*, turning
+  received L1/L2 audio into the actual distortion/noise measurements
+  INFO1 reports, also doesn't exist yet), and only after all of that:
+  shell mapping, trellis encoding/Viterbi decoding, QAM constellation
+  mapping, the scrambler/descrambler, carrier recovery, and an adaptive
+  equalizer -- the harder, genuinely multi-month-scale remainder of a
+  real V.34 data-mode modem, honestly not close yet.
 - Any interoperability test against a real modem, physical or
   software — nothing in this phase has been claimed as "working" per
   CLAUDE.md's rule against claiming standard support without
