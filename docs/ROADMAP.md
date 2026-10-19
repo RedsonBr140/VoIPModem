@@ -881,6 +881,27 @@ effort, not a near-complete one:
   nonzero regardless of line quality. None of this has been run over a
   real call, and no interoperability test against a real V.34 modem
   exists -- per CLAUDE.md, V.34 is NOT claimed as supported.
+  **First Phase 3/4 primitive: the QAM superconstellation (2026-10-19).**
+  New `V34Constellation.h`/`.cpp` implements clause 9.1's 1664-point
+  superconstellation (Figure 5's quarter-constellation + clockwise
+  90/180/270-degree rotations). Figure 5 is a literal scatter-plot
+  image, not a text table -- unlike every other table/figure this
+  phase has extracted so far -- so it couldn't be read off directly.
+  Extracted via `pdftotext -table` (which aligned the image's point
+  labels into a column grid far more reliably than `-layout` did for
+  this specific figure) and cross-validated against the spec's own
+  stated ordering rule end to end (smallest magnitude first, ties
+  broken by greatest imaginary component): all 416 points satisfy it
+  with zero exceptions, which would be astronomically unlikely by
+  chance if the column mapping were wrong. Still NOT confirmed
+  pixel-by-pixel against the actual image or against a real V.34
+  modem. 12 new tests (200 total). This is one isolated building
+  block, nothing more -- the scrambler (clause 7), shell mapping,
+  trellis encoding/Viterbi decoding, carrier recovery, and an adaptive
+  equalizer are all still unimplemented, and Phase 3 itself (clause
+  11.3, equalizer/echo-canceller training) needs all of them together
+  before any of its own sequencing could be honestly attempted -- it
+  is NOT just a sequencing extension the way Phase 2 was.
 - **Hayes ATL/ATM (speaker volume/mode) and local audio monitoring,
   added (2026-10-19), separate from the V.34 work above.** User asked
   how to "hear the modem" the way a real modem's on-board speaker lets
