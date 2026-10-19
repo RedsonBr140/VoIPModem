@@ -85,6 +85,7 @@
     <ClCompile Include="V8CallMenuTests.cpp" />
     <ClCompile Include="V34CrcTests.cpp" />
     <ClCompile Include="V34Info0Tests.cpp" />
+    <ClCompile Include="V34Info1Tests.cpp" />
     <ClCompile Include="DbpskTests.cpp" />
     <ClCompile Include="V34InfoSequenceTests.cpp" />
     <ClCompile Include="V34ProbingTonesTests.cpp" />

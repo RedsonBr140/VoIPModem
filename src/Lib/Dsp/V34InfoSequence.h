@@ -6,6 +6,7 @@
 #include "DbpskDemodulator.h"
 #include "DspTypes.h"
 #include "V34Info0.h"
+#include "V34Info1.h"
 
 namespace voipmodem::dsp {
 
@@ -65,6 +66,40 @@ public:
     explicit StreamingInfo0Receiver(double carrierHz, int sampleRateHz = kSampleRateHz);
 
     std::optional<V34Info0> ProcessSamples(const std::vector<Sample>& samples);
+
+private:
+    DbpskDemodulator demodulator_;
+    std::vector<bool> bits_;
+    size_t searchResumeIndex_ = 0;
+};
+
+// INFO1c/INFO1a counterparts to EncodeInfo0ToSamples/
+// StreamingInfo0Receiver -- same DBPSK transport, same carrier
+// convention (answer modem's own sequences, INFO1a included, on
+// kAnswerModemInfoCarrierHz; call modem's, INFO1c included, on
+// kCallModemInfoCarrierHz), confirmed against 10.1.2.3's own framing
+// of INFO0/INFO1 as parallel "a"/"c" sequence pairs. See
+// V34Info1.h for the bit layout itself.
+void EncodeInfo1cToSamples(const V34Info1c& info, double carrierHz, std::vector<Sample>& out,
+                            int sampleRateHz = kSampleRateHz);
+void EncodeInfo1aToSamples(const V34Info1a& info, double carrierHz, std::vector<Sample>& out,
+                            int sampleRateHz = kSampleRateHz);
+
+class StreamingInfo1cReceiver {
+public:
+    explicit StreamingInfo1cReceiver(double carrierHz, int sampleRateHz = kSampleRateHz);
+    std::optional<V34Info1c> ProcessSamples(const std::vector<Sample>& samples);
+
+private:
+    DbpskDemodulator demodulator_;
+    std::vector<bool> bits_;
+    size_t searchResumeIndex_ = 0;
+};
+
+class StreamingInfo1aReceiver {
+public:
+    explicit StreamingInfo1aReceiver(double carrierHz, int sampleRateHz = kSampleRateHz);
+    std::optional<V34Info1a> ProcessSamples(const std::vector<Sample>& samples);
 
 private:
     DbpskDemodulator demodulator_;

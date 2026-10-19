@@ -71,6 +71,56 @@ TEST(V34InfoSequence_Decode_WrongCarrier_FailsToRoundTrip) {
     EXPECT_TRUE(!decoded.has_value());
 }
 
+TEST(StreamingInfo1cReceiver_ChunkedAudioWithLeadingSilence_DecodesCorrectly) {
+    V34Info1c original = MakeDefaultLocalInfo1c();
+    original.mdLengthIn35msUnits = 10;
+    original.rate2400.projectedDataRateMultiplier = 0; // honestly 0; see V34Info1.h
+
+    std::vector<Sample> samples(200, 0.0f);
+    EncodeInfo1cToSamples(original, kCallModemInfoCarrierHz, samples);
+    samples.insert(samples.end(), 100, 0.0f);
+
+    StreamingInfo1cReceiver receiver(kCallModemInfoCarrierHz);
+    std::optional<V34Info1c> decoded;
+    const size_t kFrameSize = 160;
+    for (size_t offset = 0; offset < samples.size() && !decoded.has_value(); offset += kFrameSize) {
+        const size_t end = std::min(offset + kFrameSize, samples.size());
+        const std::vector<Sample> chunk(samples.begin() + static_cast<long>(offset),
+                                         samples.begin() + static_cast<long>(end));
+        decoded = receiver.ProcessSamples(chunk);
+    }
+
+    EXPECT_TRUE(decoded.has_value());
+    if (decoded.has_value()) {
+        EXPECT_EQ(static_cast<int>(decoded->mdLengthIn35msUnits), 10);
+        EXPECT_EQ(static_cast<int>(decoded->frequencyOffsetRaw), -512);
+    }
+}
+
+TEST(StreamingInfo1aReceiver_ChunkedAudioWithLeadingSilence_DecodesCorrectly) {
+    V34Info1a original = MakeDefaultLocalInfo1a();
+    original.symbolRateAnswerToCall = 0;
+
+    std::vector<Sample> samples(200, 0.0f);
+    EncodeInfo1aToSamples(original, kAnswerModemInfoCarrierHz, samples);
+    samples.insert(samples.end(), 100, 0.0f);
+
+    StreamingInfo1aReceiver receiver(kAnswerModemInfoCarrierHz);
+    std::optional<V34Info1a> decoded;
+    const size_t kFrameSize = 160;
+    for (size_t offset = 0; offset < samples.size() && !decoded.has_value(); offset += kFrameSize) {
+        const size_t end = std::min(offset + kFrameSize, samples.size());
+        const std::vector<Sample> chunk(samples.begin() + static_cast<long>(offset),
+                                         samples.begin() + static_cast<long>(end));
+        decoded = receiver.ProcessSamples(chunk);
+    }
+
+    EXPECT_TRUE(decoded.has_value());
+    if (decoded.has_value()) {
+        EXPECT_EQ(static_cast<int>(decoded->symbolRateAnswerToCall), 0);
+    }
+}
+
 TEST(StreamingInfo0Receiver_ChunkedAudioWithLeadingSilence_DecodesCorrectly) {
     // Real call audio: the receiver is armed well before the other
     // side actually starts transmitting, and frames don't line up with
