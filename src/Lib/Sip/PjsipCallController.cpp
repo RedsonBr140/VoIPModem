@@ -69,6 +69,7 @@ public:
     std::unique_ptr<SipCall> activeCall_;
     std::unique_ptr<SipCall> pendingIncomingCall_;
     bool enableV34Probing_ = false;
+    bool enableLocalAudio_ = false;
 };
 
 class SipCall : public pj::Call {
@@ -123,8 +124,8 @@ public:
 
             if (!audioBridge_) {
                 try {
-                    audioBridge_ =
-                        std::make_unique<CallAudioBridge>(callingParty_, impl_.logger_, impl_.enableV34Probing_);
+                    audioBridge_ = std::make_unique<CallAudioBridge>(callingParty_, impl_.logger_,
+                                                                      impl_.enableV34Probing_, impl_.enableLocalAudio_);
                     audioBridge_->Start(*audioMedia);
                 } catch (const pj::Error& err) {
                     impl_.logger_.Error("Failed to start tone-probe audio bridge: " + err.info());
@@ -206,6 +207,7 @@ void PjsipCallController::Impl::RetireCall(SipCall* which) {
 PjsipCallController::PjsipCallController(PjsipEndpoint& endpoint, SipAccountConfig config, TaggedLogger& logger)
     : endpoint_(endpoint), config_(std::move(config)), logger_(logger), impl_(std::make_unique<Impl>(logger)) {
     impl_->enableV34Probing_ = config_.enableV34Probing;
+    impl_->enableLocalAudio_ = config_.enableLocalAudio;
 }
 
 PjsipCallController::~PjsipCallController() {

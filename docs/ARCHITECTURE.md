@@ -585,11 +585,16 @@ real call with this flag on.
 `waveOutOpen`/`waveOutWrite` (multi-buffered, polling `WHDR_DONE`
 rather than a callback) to play PCM audio out the Windows default
 sound output device. `CallAudioBridge` mixes every frame's RX+TX audio
-and writes it there unconditionally -- no new config flag, since it
-can't affect the real call, only ever adds a locally-audible monitor.
-There's no separate modem-specific volume/device setting of its own:
-the audio is just an ordinary Windows playback stream, so the
-*existing* Windows Sound settings/Volume Mixer already control it.
+and writes it there -- but only if `ModemInstanceConfig::enableLocalAudio`
+(`EnableLocalAudio=1` per `[Modem...]` ini section) is set for that
+line, default false. Per-line and opt-in rather than always-on: two
+VoIPModem instances calling each other on the SAME machine (the
+com0com test rig) would otherwise both open the shared default device
+and mix into one indistinguishable stream, so enable it on just the
+one line you want to listen to at a time. There's no separate
+modem-specific volume/device setting of its own: the audio is just an
+ordinary Windows playback stream, so the *existing* Windows Sound
+settings/Volume Mixer already control it.
 Separately, `AtCommand`/`AtCommandParser`/`ModemStateMachine`/
 `ModemProfile` now accept ATLn/ATMn (speaker volume/mode) instead of
 erroring on them -- real-world motivation: Windows' own "Phone and

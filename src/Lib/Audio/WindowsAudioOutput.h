@@ -47,6 +47,13 @@ namespace voipmodem {
 // waveOutWrite(), silently dropping audio if every buffer is still in
 // flight -- this is a best-effort monitor, not a lossless sink; it
 // must never block or slow down the real call's actual audio path.
+//
+// Whether a given modem line even constructs one of these at all is
+// `ModemInstanceConfig::enableLocalAudio`'s job (ini: `EnableLocalAudio=1`
+// per `[Modem...]` section) -- e.g. so two VoIPModem instances calling
+// each other on the SAME machine (the com0com test rig) don't both
+// open the shared default device and mix into one indistinguishable
+// stream: enable it on whichever single line you want to listen to.
 class WindowsAudioOutput {
 public:
     WindowsAudioOutput();

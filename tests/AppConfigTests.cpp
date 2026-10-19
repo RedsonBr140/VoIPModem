@@ -48,6 +48,36 @@ TEST(EnableV34Probing_ParsesExplicitTrue) {
     EXPECT_TRUE(config.modems[0].enableV34Probing);
 }
 
+TEST(EnableLocalAudio_DefaultsToFalse) {
+    IniConfig ini;
+    ini.LoadFromString("[Modem]\nComPort=COM3\n");
+
+    const AppConfig config = LoadAppConfig(ini);
+    EXPECT_TRUE(!config.modems[0].enableLocalAudio);
+}
+
+TEST(EnableLocalAudio_ParsesExplicitTrue) {
+    IniConfig ini;
+    ini.LoadFromString("[Modem]\nEnableLocalAudio=1\n");
+
+    const AppConfig config = LoadAppConfig(ini);
+    EXPECT_TRUE(config.modems[0].enableLocalAudio);
+}
+
+TEST(EnableLocalAudio_IsIndependentPerInstance) {
+    // The whole point: enable it on only ONE of two local test-rig
+    // lines, not both.
+    IniConfig ini;
+    ini.LoadFromString(
+        "[Modem.A]\nEnableLocalAudio=1\n"
+        "[Modem.B]\nEnableLocalAudio=0\n");
+
+    const AppConfig config = LoadAppConfig(ini);
+    EXPECT_EQ(config.modems.size(), static_cast<size_t>(2));
+    EXPECT_TRUE(config.modems[0].enableLocalAudio);
+    EXPECT_TRUE(!config.modems[1].enableLocalAudio);
+}
+
 TEST(MultipleModemSections_YieldOneInstanceEachInFileOrder) {
     IniConfig ini;
     ini.LoadFromString(

@@ -61,12 +61,16 @@ std::string DescribeModulationModes(dsp::V8ModulationModeItem selected) {
 
 } // namespace
 
-CallAudioBridge::CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableV34Probing)
+CallAudioBridge::CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableV34Probing, bool enableLocalAudio)
     : callingParty_(callingParty),
       logger_(logger),
       enableV34Probing_(enableV34Probing),
       handshake_(callingParty ? dsp::V8Handshake::Role::CallDce : dsp::V8Handshake::Role::AnswerDce,
-                 MakeLocalMenu(enableV34Probing), logger) {}
+                 MakeLocalMenu(enableV34Probing), logger) {
+    if (enableLocalAudio) {
+        localSpeaker_.emplace();
+    }
+}
 
 void CallAudioBridge::Start(pj::AudioMedia& callAudio) {
     pj::MediaFormatAudio format;
@@ -80,7 +84,8 @@ void CallAudioBridge::Start(pj::AudioMedia& callAudio) {
 
     logger_.Info(std::string("CallAudioBridge started (") + (callingParty_ ? "calling party" : "answering party") +
                  "); running the real ITU-T V.8 handshake (ANSam/CM/JM/CJ), advertising V.21" +
-                 (enableV34Probing_ ? "+V.34 (probing only, not a connection)" : " only"));
+                 (enableV34Probing_ ? "+V.34 (probing only, not a connection)" : " only") +
+                 (localSpeaker_.has_value() ? "; local audio monitor enabled" : ""));
 }
 
 void CallAudioBridge::onFrameRequested(pj::MediaFrame& frame) {
@@ -100,7 +105,7 @@ void CallAudioBridge::onFrameRequested(pj::MediaFrame& frame) {
 
 void CallAudioBridge::PlayLocally(const std::vector<dsp::Sample>& rxSamples,
                                    const std::vector<dsp::Sample>& txSamples) {
-    if (!localSpeaker_.IsAvailable()) {
+    if (!localSpeaker_.has_value() || !localSpeaker_->IsAvailable()) {
         return;
     }
     // A real phone line acoustically mixes both directions onto the one
@@ -114,7 +119,7 @@ void CallAudioBridge::PlayLocally(const std::vector<dsp::Sample>& rxSamples,
     for (size_t i = 0; i < txSamples.size(); ++i) {
         mixed[i] += txSamples[i];
     }
-    localSpeaker_.Write(mixed);
+    localSpeaker_->Write(mixed);
 }
 
 void CallAudioBridge::onFrameReceived(pj::MediaFrame& frame) {

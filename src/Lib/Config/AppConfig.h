@@ -35,6 +35,15 @@ struct ModemInstanceConfig {
     // test rig), never on an instance that takes real inbound calls.
     bool enableV34Probing = false;
 
+    // Default false: whether this line's CallAudioBridge mirrors its
+    // call audio to the local PC's default sound output device (see
+    // WindowsAudioOutput/CallAudioBridge). Per-line and opt-in so two
+    // VoIPModem instances calling each other on the SAME machine (the
+    // com0com test rig) don't both open the shared default device and
+    // mix into one indistinguishable stream -- enable it on whichever
+    // single line you want to listen to.
+    bool enableLocalAudio = false;
+
     // SIP registration for this instance's extension. If sipServer is
     // empty, this instance gets NullCallController instead of real SIP —
     // see ModemInstance and docs/ARCHITECTURE.md "SIP integration (Phase 2)".

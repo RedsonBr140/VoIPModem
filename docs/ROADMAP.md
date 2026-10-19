@@ -843,17 +843,29 @@ effort, not a near-complete one:
   - New `src/Lib/Audio/WindowsAudioOutput.h`/`.cpp`: a thin winmm
     (`waveOutOpen`/`waveOutWrite`, multi-buffered, polling `WHDR_DONE`
     instead of a callback) wrapper that plays PCM audio out the
-    Windows default sound output device. `CallAudioBridge` now mixes
+    Windows default sound output device. `CallAudioBridge` mixes
     every frame's RX+TX audio (the same way a real 2-wire line
     acoustically combines both directions onto whatever's tapping it)
-    and writes it there, unconditionally -- not gated behind
-    `enableV34Probing` or any new flag, since it has zero effect on
-    the real call, only ever adds a locally-audible monitor. This is
-    the actual, literal answer to "hear the modem in Windows settings":
-    there is no separate modem-specific settings page: the audio just
-    appears as an ordinary Windows playback stream, so the *existing*
-    Windows Sound settings/Volume Mixer (device choice, mute, volume)
-    already control it, same as any other app's audio.
+    and writes it there -- gated behind new
+    `ModemInstanceConfig::enableLocalAudio` (`EnableLocalAudio=1` per
+    `[Modem...]` ini section), default false, threaded through
+    `SipAccountConfig`/`PjsipCallController::Impl` the same way
+    `enableV34Probing` already is. Deliberately per-line and opt-in,
+    not always-on (an earlier version of this increment tried
+    always-on and the user caught the problem immediately): two
+    VoIPModem instances calling each other on the SAME machine (the
+    com0com test rig) would otherwise both open the one shared default
+    device and mix into one indistinguishable stream -- enabling it on
+    just one line at a time is the actual fix, not stereo panning or
+    any other automatic trick. This is the literal answer to "hear the
+    modem in Windows settings": there is no separate modem-specific
+    settings page, the audio just appears as an ordinary Windows
+    playback stream once enabled, so the *existing* Windows Sound
+    settings/Volume Mixer (device choice, mute, volume) already
+    control it, same as any other app's audio. 3 new `AppConfig` tests
+    (167 total): defaults false, parses an explicit `1`, and -- the one
+    that actually matters -- two `[Modem.X]` sections parse the flag
+    independently of each other.
   Honest gap between the two pieces: ATL/ATM's *values* are accepted
   and stored, but `WindowsAudioOutput`/`CallAudioBridge` do not yet
   read them back -- playback is unconditionally "on" regardless of

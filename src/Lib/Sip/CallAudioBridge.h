@@ -49,17 +49,24 @@ namespace voipmodem {
 // just drain that buffer -- silence on the first frame or two if
 // onFrameRequested happens to fire before onFrameReceived ever has.
 //
-// Also mirrors every frame's RX+TX audio to the local PC's default
-// sound output device (`WindowsAudioOutput`) -- the actual answer to
-// "how do I hear the modem" -- so this is always-on, not gated behind
-// `enableV34Probing` or any other flag; it's purely a local monitor
-// with zero effect on the real call. Which device and how loud is
-// entirely Windows' own Sound settings/Volume Mixer, same as any other
-// app's audio -- this class has no volume/device control of its own,
-// and deliberately does not yet honor ATL/ATM (see ModemProfile.h).
+// If `enableLocalAudio` is true, also mirrors every frame's RX+TX
+// audio to the local PC's default sound output device
+// (`WindowsAudioOutput`) -- the actual answer to "how do I hear the
+// modem". Per-line, opt-in via `ModemInstanceConfig::enableLocalAudio`
+// (ini: `EnableLocalAudio=1`), default false: two VoIPModem instances
+// calling each other on the SAME machine (the com0com test rig) would
+// otherwise both open the shared default device and mix into one
+// indistinguishable stream, so enable it on whichever single line
+// you actually want to listen to. Has zero effect on the real call
+// either way -- it's purely a local monitor. Which device and how
+// loud is entirely Windows' own Sound settings/Volume Mixer, same as
+// any other app's audio -- this class has no volume/device control of
+// its own, and deliberately does not yet honor ATL/ATM (see
+// ModemProfile.h).
 class CallAudioBridge : public pj::AudioMediaPort {
 public:
-    CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableV34Probing = false);
+    CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableV34Probing = false,
+                     bool enableLocalAudio = false);
 
     // Creates the port and wires it bidirectionally to `callAudio` (the
     // active call's audio media, as handed to SipCall::onCallMediaState).
@@ -84,7 +91,7 @@ private:
     std::optional<dsp::V34Phase2Handshake> phase2Handshake_;
     bool loggedRtd_ = false;
     bool loggedL1_ = false;
-    WindowsAudioOutput localSpeaker_;
+    std::optional<WindowsAudioOutput> localSpeaker_; // only constructed if enableLocalAudio was true
 };
 
 } // namespace voipmodem
