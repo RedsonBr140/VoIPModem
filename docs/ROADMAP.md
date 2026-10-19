@@ -660,14 +660,48 @@ effort, not a near-complete one:
   each side's own retry/timeout fallbacks (11.2.2) -- none of that
   state machine is implemented yet, nor is round-trip-delay
   measurement itself.
-  Not yet done, in rough order: a phase-reversal detector with
-  real timing-accuracy guarantees (needed before round-trip-delay
-  measurement means anything), INFO1a/INFO1c (they carry *computed*
-  line-probing results this codebase can't produce yet), the actual
-  L1/L2 multitone probe signals and their channel-response analysis,
-  and the Phase 2 procedure's sequencing/timing/retry state machine
-  (11.2) that ties all of the above together. Then: shell mapping,
-  trellis encoding and Viterbi decoding, rate negotiation.
+  **Phase-reversal detection added (same day)**: new
+  `TonePhaseReversalDetector.h`/`.cpp` fills the gap flagged above --
+  it's what makes the generated tones actually useful for round-trip
+  delay. Design: a sliding-window correlator against a local reference
+  carrier (never reset, same idea `DbpskDemodulator` already uses),
+  updated one sample at a time rather than in non-overlapping blocks,
+  so detection resolution is roughly a sample instead of a whole
+  window. Compares the sliding window's (I, Q) against a baseline
+  captured once the window first fills, and again right after each
+  detected reversal, so a *second* reversal is judged against the
+  post-first-reversal steady state rather than the original phase --
+  matching 10.1.2.1/10.1.2.2's own "A to A', A' to A" wording. A
+  magnitude gate avoids trusting a sign decision during silence/noise,
+  and a dead time (one window's worth of samples) after each detection
+  stops the transition itself, which takes about a window to fully
+  flush through the sliding correlator, from being mistaken for extra
+  reversals.
+  6 new tests (141 total): no false positives over a long steady tone
+  or over silence, a single reversal detected within the expected
+  +-(window/2) timing tolerance of where it was actually inserted (not
+  a loosened tolerance -- it's exactly the resolution limit the
+  windowed-correlator design implies), two sequential reversals both
+  detected at their correct respective indices, chunked-delivery
+  parity with whole-buffer delivery (same discipline as
+  `Dbpsk`/`Fsk`'s own chunked-delivery tests), and -- the one
+  specifically worth calling out -- correctly detecting a Tone A
+  reversal with its 1800Hz guard tone mixed in and additively present
+  the whole time, proving the 2400Hz-targeted correlator isn't thrown
+  off by that other, never-reversing energy.
+  Still only a bare detection primitive, not yet connected to a real
+  round-trip-delay *calculation* (RTDEa/RTDEc = the time between two
+  specific reversals, each side's own, minus 40ms, per
+  11.2.1.1.4/11.2.1.2.4) or to clause 11.2's sequencing/timing/retry
+  procedure that decides when to listen for which tone, when to send a
+  reversal of its own, and what to do if nothing is detected in time.
+  Not yet done, in rough order: the actual round-trip-delay
+  calculation built on top of this detector, INFO1a/INFO1c (they carry
+  *computed* line-probing results this codebase still can't produce),
+  the actual L1/L2 multitone probe signals and their channel-response
+  analysis, and the Phase 2 procedure's full sequencing/timing/retry
+  state machine (11.2) that ties all of the above together. Then: shell
+  mapping, trellis encoding and Viterbi decoding, rate negotiation.
 - Any interoperability test against a real modem, physical or
   software — nothing in this phase has been claimed as "working" per
   CLAUDE.md's rule against claiming standard support without
