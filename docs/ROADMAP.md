@@ -769,23 +769,43 @@ effort, not a near-complete one:
   INFO0 finished arriving -- costs the detector's baseline-capture
   window a slightly later start, not an error in any RTD value actually
   computed.
-  **Still not implemented, and this is the honest remaining size of
-  it**: everything from 11.2.1.1.5/11.2.1.2.6 onward -- the actual
-  L1/L2 send-and-receive exchange (`LineProbingSignalGenerator` exists
-  and is ready, this class just doesn't call it yet), this
-  implementation's own L1/L2 channel-response *analysis* (turning
-  received L1/L2 audio into actual distortion/noise measurements),
-  INFO1a/INFO1c (they carry those computed results), the handoff into
-  Phase 3, and all of clause 11.2.2's retry/recovery procedure (the
-  same honestly-deferred gap `V8Handshake` itself still has -- nothing
-  here times out or retries if a step never completes either). Only
-  after ALL of that: shell mapping, trellis encoding/Viterbi decoding,
-  QAM constellation mapping, the scrambler/descrambler, carrier
-  recovery, and an adaptive equalizer -- the harder, genuinely
-  multi-month-scale remainder of a real V.34 data-mode modem. None of
-  this has been run over a real call, and no interoperability test
-  against a real V.34 modem exists -- per CLAUDE.md, V.34 is NOT
-  claimed as supported.
+  **L1 (just L1, not L2) wired in (same day).** Right after the
+  answer DCE's .2.5 reversal hold completes, it now transmits L1 for
+  its fixed 160ms (`LineProbingSignalGenerator::GenerateL1Samples`)
+  instead of going straight to silence; the call DCE, once its own
+  RTDEc is measured, detects L1's arrival (a plain Goertzel presence
+  check at one of its own Table 17 tones, 150Hz -- *not* a
+  channel-response measurement, just "has L1-shaped energy started")
+  and tracks its 160ms window, exposed via `GetHasReceivedL1()`. 1 new
+  test (157 total): both sides run the full exchange and the call DCE
+  ends up reporting L1 received.
+  **L2 is deliberately NOT implemented, and this is a real open
+  question, not a difficulty rating.** 11.2.1.1.5/11.2.1.2.6's own
+  wording ties L2's transmission duration to the sender "having
+  received the local echo of L2" -- a real PSTN 2-wire/4-wire
+  hybrid-circuit artifact. This project bridges calls through a
+  digital VoIP path (Asterisk/RTP), which has no such echo in the
+  analog sense; what, if anything, should stand in for it here hasn't
+  been decided. Writing code that pretends an answer exists would be
+  guessing at a requirement, not extracting one from the text, so
+  nothing past L1 has been attempted. (Flagged to the user directly;
+  no decision made yet as of this writing.)
+  Still not implemented: the second Tone A/B reversal exchange that
+  follows L1/L2 (11.2.1.1.6/11.2.1.2.6 onward), this implementation's
+  own L1/L2 channel-response *analysis* (turning received L1/L2 audio
+  into actual distortion/noise measurements -- note this is a
+  separate problem from L2's duration-sequencing one above, and also
+  still open regardless of how that gets resolved), INFO1a/INFO1c
+  (they carry those computed results), the handoff into Phase 3, and
+  all of clause 11.2.2's retry/recovery procedure (the same
+  honestly-deferred gap `V8Handshake` itself still has -- nothing here
+  times out or retries if a step never completes either). Only after
+  ALL of that: shell mapping, trellis encoding/Viterbi decoding, QAM
+  constellation mapping, the scrambler/descrambler, carrier recovery,
+  and an adaptive equalizer -- the harder, genuinely multi-month-scale
+  remainder of a real V.34 data-mode modem. None of this has been run
+  over a real call, and no interoperability test against a real V.34
+  modem exists -- per CLAUDE.md, V.34 is NOT claimed as supported.
 - Any interoperability test against a real modem, physical or
   software — nothing in this phase has been claimed as "working" per
   CLAUDE.md's rule against claiming standard support without

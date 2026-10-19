@@ -69,6 +69,35 @@ bool RunLoopbackToCompletion(V34Phase2Handshake& callDce, V34Phase2Handshake& an
     return callDce.GetOutcome() == V34Phase2Outcome::RoundTripDelayMeasured &&
            answerDce.GetOutcome() == V34Phase2Outcome::RoundTripDelayMeasured;
 }
+
+// Same loopback mechanics, but keeps running past RTD measurement
+// until the call DCE reports L1 received (11.2.1.1.4/.5's next step)
+// or `maxFrames` elapses.
+bool RunLoopbackUntilL1Received(V34Phase2Handshake& callDce, V34Phase2Handshake& answerDce, int oneWayDelaySamples,
+                                  int maxFrames) {
+    DelayLine callToAnswer(oneWayDelaySamples);
+    DelayLine answerToCall(oneWayDelaySamples);
+    std::vector<Sample> callTx;
+    std::vector<Sample> answerTx;
+    const std::vector<Sample> silence(static_cast<size_t>(kFrameSampleCount), 0.0f);
+
+    callDce.ProcessFrame(silence, callTx, kFrameSampleCount);
+    answerDce.ProcessFrame(silence, answerTx, kFrameSampleCount);
+
+    for (int frame = 0; frame < maxFrames; ++frame) {
+        if (callDce.GetHasReceivedL1()) {
+            return true;
+        }
+
+        const std::vector<Sample> rxForCallDce = answerToCall.Push(answerTx);
+        const std::vector<Sample> rxForAnswerDce = callToAnswer.Push(callTx);
+
+        callDce.ProcessFrame(rxForCallDce, callTx, kFrameSampleCount);
+        answerDce.ProcessFrame(rxForAnswerDce, answerTx, kFrameSampleCount);
+    }
+
+    return callDce.GetHasReceivedL1();
+}
 } // namespace
 
 TEST(V34Phase2Handshake_FullLoopback_BothSidesMeasureRoundTripDelay) {
@@ -129,4 +158,20 @@ TEST(V34Phase2Handshake_WithSimulatedLineDelay_ComputesASaneNonZeroRoundTripDela
         EXPECT_TRUE(std::abs(callDce.GetRoundTripDelaySeconds() - expectedRoundTripSeconds) < tolerance);
         EXPECT_TRUE(std::abs(answerDce.GetRoundTripDelaySeconds() - expectedRoundTripSeconds) < tolerance);
     }
+}
+
+TEST(V34Phase2Handshake_AfterRtdMeasured_CallDceReceivesL1) {
+    Logger logger;
+    TaggedLogger callLogger(logger, "CallDceL1Test");
+    TaggedLogger answerLogger(logger, "AnswerDceL1Test");
+
+    V34Phase2Handshake callDce(V34Phase2Handshake::Role::CallDce, kNominalAmplitude, callLogger);
+    V34Phase2Handshake answerDce(V34Phase2Handshake::Role::AnswerDce, kNominalAmplitude, answerLogger);
+
+    EXPECT_TRUE(!callDce.GetHasReceivedL1());
+
+    const bool received = RunLoopbackUntilL1Received(callDce, answerDce, /*oneWayDelaySamples=*/0, /*maxFrames=*/800);
+
+    EXPECT_TRUE(received);
+    EXPECT_TRUE(callDce.GetHasReceivedL1());
 }

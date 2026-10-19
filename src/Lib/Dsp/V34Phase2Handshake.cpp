@@ -13,6 +13,7 @@ V34Phase2Handshake::V34Phase2Handshake(Role role, Sample nominalAmplitude, Tagge
       logger_(logger),
       silenceSamplesRemaining_(static_cast<long long>(kSilentPeriodSeconds * sampleRateHz)),
       info0aReceiver_(kAnswerModemInfoCarrierHz, sampleRateHz),
+      l1PresenceDetector_(kL1PresenceBeaconHz, sampleRateHz),
       info0cReceiver_(kCallModemInfoCarrierHz, sampleRateHz),
       toneBPresenceDetector_(kCallModemInfoCarrierHz, sampleRateHz) {}
 
@@ -48,7 +49,7 @@ void V34Phase2Handshake::ProcessCallDceFrame(const std::vector<Sample>& rxSample
             toneADetector_.emplace(kAnswerModemInfoCarrierHz, sampleRateHz_);
             toneADetectorStartAbs_ = elapsedSamples_ + frameSampleCount;
         }
-    } else if (toneADetector_.has_value()) {
+    } else if (toneAEventsSeen_ < 2 && toneADetector_.has_value()) {
         const std::vector<long long> events = toneADetector_->ProcessSamples(rxSamples);
         for (long long relativeIndex : events) {
             const long long absoluteIndex = toneADetectorStartAbs_ + relativeIndex;
@@ -68,6 +69,27 @@ void V34Phase2Handshake::ProcessCallDceFrame(const std::vector<Sample>& rxSample
                 outcome_ = V34Phase2Outcome::RoundTripDelayMeasured;
                 logger_.Info("V34Phase2Handshake(CallDce): RTDEc computed");
             }
+        }
+    } else if (outcome_ == V34Phase2Outcome::RoundTripDelayMeasured && !l1Received_) {
+        // 11.2.1.1.4/.5: receiver reconditioned to receive L1 (and,
+        // not yet implemented, L2 -- see class comment). L1PresenceDetector_
+        // only tells us L1-shaped energy has started; it isn't a
+        // channel-response measurement of any kind.
+        if (!l1PresenceDetected_) {
+            l1PresenceDetector_.Reset();
+            for (Sample sample : rxSamples) {
+                l1PresenceDetector_.Process(sample);
+            }
+            const double magnitude = l1PresenceDetector_.Magnitude(static_cast<int>(rxSamples.size()));
+            if (magnitude > kTonePresenceThreshold * nominalAmplitude_) {
+                l1PresenceDetected_ = true;
+                l1DetectionStartAbs_ = elapsedSamples_;
+                logger_.Info("V34Phase2Handshake(CallDce): L1 presence detected");
+            }
+        } else if (elapsedSamples_ + frameSampleCount - l1DetectionStartAbs_ >=
+                   static_cast<long long>(kL1DurationSeconds * sampleRateHz_)) {
+            l1Received_ = true;
+            logger_.Info("V34Phase2Handshake(CallDce): L1's 160ms duration elapsed");
         }
     }
 
@@ -274,6 +296,15 @@ void V34Phase2Handshake::GenerateAnswerDceToneA(std::vector<Sample>& out, int sa
             secondReversalAppliedAbs_ = cursor;
             logger_.Info("V34Phase2Handshake(AnswerDce): applied second Tone A reversal");
         }
+        if (secondReversalHoldDone_ && !l1TxStarted_) {
+            // 11.2.1.2.5: hold just finished -- start L1 for its fixed
+            // 160ms (L2 deliberately not implemented, see class
+            // comment).
+            l1TxStarted_ = true;
+            l1TxEndAbs_ = cursor + static_cast<long long>(kL1DurationSeconds * sampleRateHz_);
+            l1Generator_.emplace(nominalAmplitude_, sampleRateHz_);
+            logger_.Info("V34Phase2Handshake(AnswerDce): starting L1 transmission");
+        }
 
         long long nextEventAbs = chunkEnd;
         if (firstReversalScheduled_ && !firstReversalApplied_) {
@@ -285,6 +316,9 @@ void V34Phase2Handshake::GenerateAnswerDceToneA(std::vector<Sample>& out, int sa
         if (secondReversalApplied_ && !secondReversalHoldDone_) {
             nextEventAbs = std::min(nextEventAbs, secondReversalAppliedAbs_ + holdSamples);
         }
+        if (l1TxStarted_ && cursor < l1TxEndAbs_) {
+            nextEventAbs = std::min(nextEventAbs, l1TxEndAbs_);
+        }
 
         const long long chunkLen = nextEventAbs - cursor;
         if (chunkLen <= 0) {
@@ -292,10 +326,12 @@ void V34Phase2Handshake::GenerateAnswerDceToneA(std::vector<Sample>& out, int sa
             continue;
         }
 
-        if (secondReversalHoldDone_) {
-            out.insert(out.end(), static_cast<size_t>(chunkLen), Sample(0));
-        } else {
+        if (!secondReversalHoldDone_) {
             toneAGenerator_->GenerateSamples(out, static_cast<int>(chunkLen));
+        } else if (l1TxStarted_ && cursor < l1TxEndAbs_) {
+            l1Generator_->GenerateL1Samples(out, static_cast<int>(chunkLen));
+        } else {
+            out.insert(out.end(), static_cast<size_t>(chunkLen), Sample(0));
         }
         cursor += chunkLen;
 
