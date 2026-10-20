@@ -87,6 +87,8 @@
     <ClCompile Include="V34Info0Tests.cpp" />
     <ClCompile Include="V34Info1Tests.cpp" />
     <ClCompile Include="V34ConstellationTests.cpp" />
+    <ClCompile Include="V34ScramblerTests.cpp" />
+    <ClCompile Include="V34TrnTests.cpp" />
     <ClCompile Include="DbpskTests.cpp" />
     <ClCompile Include="V34InfoSequenceTests.cpp" />
     <ClCompile Include="V34ProbingTonesTests.cpp" />

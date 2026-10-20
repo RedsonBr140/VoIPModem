@@ -902,6 +902,49 @@ effort, not a near-complete one:
   11.3, equalizer/echo-canceller training) needs all of them together
   before any of its own sequencing could be honestly attempted -- it
   is NOT just a sequencing extension the way Phase 2 was.
+  **Second and third Phase 3 primitives: the scrambler and TRN symbol
+  generator (2026-10-20).** New `V34Scrambler.h`/`.cpp` implements
+  clause 7's self-synchronizing scrambler/descrambler exactly as
+  specified (GF(2) division by the generating polynomial: call mode
+  GPC = 1 + x^-18 + x^-23, answer mode GPA = 1 + x^-5 + x^-23),
+  re-fetched and quoted verbatim from the Recommendation text rather
+  than from memory. New `V34Trn.h`/`.cpp` implements clause 10.1.3.8's
+  TRN signal (the actual echo-canceller/equalizer training burst a
+  real modem transmits, and what a person listening to the line would
+  hear) by combining the scrambler (fed all-ones, per the clause) with
+  the constellation module added the day before -- the 4-point and
+  16-point cases are just the scrambled bits picked apart into a
+  rotation index and (for 16-point) a base-point index into
+  `kQuarterConstellation`. Both modules verified against hand-derived
+  oracles: the exact first ~40 scrambler output bits were worked out
+  by hand from the recurrence (not from running the code) and the
+  implementation matches them bit for bit, for both tap sets; the TRN
+  tests regroup that same oracle into symbols per the clause's bit
+  weighting (`In = 2*I2n + I1n`, i.e. the second-in-time bit is the
+  high bit) and confirm the generator reproduces the resulting point
+  sequence exactly. Also tested: real round-trip (scramble then
+  descramble recovers arbitrary data) and the actual self-synchronizing
+  property (a descrambler that joins mid-stream with the wrong internal
+  state still recovers correctly after `max(n1, n2) = 23` bits, with no
+  shared initial state). 11 new tests (211 total).
+
+  **This still does not make anything audible change on a real call.**
+  `V34TrnGenerator` only produces the sequence of (I, Q) constellation
+  points a modem would transmit -- integers, not a waveform. Turning
+  that into something you could actually hear over RTP still needs,
+  at minimum: a pulse-shaping QAM modulator driven at the negotiated
+  symbol rate and carrier frequency (clause 9.3/9.4 -- not researched
+  yet, and the harder of the two to get bit-exact since it likely
+  isn't given as literal time-domain filter taps); clause 11.3's own
+  Phase 3 sequencing (PP/TRN/J/MD signal exchange, mirroring how
+  `V34Phase2Handshake` sequences Phase 2); and, to know when to
+  honestly stop transmitting TRN rather than guessing a fixed timeout,
+  some real notion of equalizer convergence -- which doesn't exist
+  because the adaptive equalizer itself doesn't exist. Shell mapping,
+  trellis encoding/Viterbi decoding, and carrier recovery are also
+  still unimplemented. `CallAudioBridge` has not been touched by any of
+  this and still stops at "received L1 (not yet implemented past this
+  point)" on a real call.
 - **Hayes ATL/ATM (speaker volume/mode) and local audio monitoring,
   added (2026-10-19), separate from the V.34 work above.** User asked
   how to "hear the modem" the way a real modem's on-board speaker lets
