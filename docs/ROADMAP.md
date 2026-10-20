@@ -945,6 +945,47 @@ effort, not a near-complete one:
   still unimplemented. `CallAudioBridge` has not been touched by any of
   this and still stops at "received L1 (not yet implemented past this
   point)" on a real call.
+  **Fourth Phase 3 primitive: a QAM pulse-shaping/carrier modulator
+  (2026-10-20).** New `V34QamModulator.h`/`.cpp` turns a symbol
+  sequence (e.g. `V34TrnGenerator`'s output) into a real passband audio
+  waveform -- the first point in this phase where V.34 work produces
+  actual sound rather than bits or integers. Re-checked the
+  Recommendation text specifically for this: clause 5.2 (symbol rate,
+  Table 1) and clause 5.3 (carrier frequency, Table 2) ARE normative
+  and exact, and this module takes them as exact caller-supplied
+  parameters. But clause 5.4.1 ("Transmit spectrum specifications")
+  only gives a +/-1 dB power-spectral-density MASK (Figures 1/2, image
+  graphs again, not filter taps) that any transmit filter must fit
+  inside -- it does not mandate a specific filter. That is a confirmed
+  gap in the normative text, not a research shortcut: grepped the full
+  extracted spec text for "roll-off", "square-root", "transmit filter",
+  "pulse shap*" and found nothing. So this module makes the same kind
+  of implementation choice any real V.34 modem vendor had to make: a
+  standard square-root-raised-cosine (SRRC) pulse with a caller-supplied
+  roll-off/span. It has NOT been measured against the Figure 1/2 mask --
+  that would need digitizing those curves first, the same problem
+  Figure 5 was.
+  Tested: the SRRC closed-form pulse's symmetry, peak-at-zero, and the
+  value at its removable singularity (t = T/(4*beta)) against the limit
+  approached from nearby points (not just "doesn't crash"); the actual
+  Nyquist zero-ISI property via discrete autocorrelation of a sampled
+  pulse (self-convolution has zero crossings at nonzero symbol-spaced
+  lags, matching what a real receive-side matched filter/equalizer
+  would rely on); output sample-count accounting; and that a modulated
+  TRN burst has Goertzel-measurable energy concentrated at the real
+  V.34 carrier frequency (1800 Hz for symbol rate 2400, Table 2) rather
+  than being broadband. One finding worth flagging: a bare SRRC pulse
+  is NOT itself zero-ISI (only SRRC matched-filtered with itself at the
+  receiver is), so with a low roll-off the unscaled output can run to
+  roughly 12x the chosen amplitude parameter -- there is no receiver in
+  this codebase yet to undo that, so this is still only useful for
+  generating a waveform to listen to or measure, not for a working
+  link. 8 new tests (219 total). Still batch-only (one fixed symbol
+  sequence in, one fixed waveform out) -- no streaming API, and still
+  not wired into `V34Phase2Handshake` or `CallAudioBridge`. Shell
+  mapping, trellis encoding/Viterbi decoding, carrier recovery, and an
+  adaptive equalizer remain unimplemented; clause 11.3's own Phase 3
+  sequencing still needs all of them before it can be attempted.
 - **Hayes ATL/ATM (speaker volume/mode) and local audio monitoring,
   added (2026-10-19), separate from the V.34 work above.** User asked
   how to "hear the modem" the way a real modem's on-board speaker lets
