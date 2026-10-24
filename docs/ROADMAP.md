@@ -986,6 +986,47 @@ effort, not a near-complete one:
   mapping, trellis encoding/Viterbi decoding, carrier recovery, and an
   adaptive equalizer remain unimplemented; clause 11.3's own Phase 3
   sequencing still needs all of them before it can be attempted.
+  **Fifth Phase 3 primitive: a QAM demodulator (2026-10-24), and a real
+  wall found by actually testing it, not assumed.** New
+  `V34QamDemodulator.h`/`.cpp` -- the receive-side counterpart to
+  `V34QamModulator`: carrier downconversion + SRRC matched filtering,
+  sampled at the symbol rate, turning a passband waveform back into
+  (I, Q) estimates. Deliberately not a real receiver yet (no
+  carrier-phase or symbol-timing recovery -- it assumes the caller
+  already knows both exactly, true only in a lossless loopback), but a
+  meaningful thing to verify now anyway: that the downconversion +
+  matched-filter arithmetic itself is correct, the same "primitive
+  verified in isolation" discipline as `Dds`/`GoertzelDetector` before
+  `FskModulator`/`FskDemodulator`, and the same loopback-before-live-call
+  approach `V8Handshake` used.
+  **Verified it works, then verified where it stops working, both by
+  measurement:** a loopback test (modulate a real 16-point TRN burst,
+  demodulate the identical waveform, nearest-neighbor decode against
+  the actual alphabet) decodes every interior symbol correctly at 400
+  baud (20 samples/symbol at this codebase's fixed 8 kHz rate) -- the
+  matched-filter math is right. The same test at V.34's own actual
+  operating point, 2400 baud (only ~3.33 samples/symbol), decodes
+  roughly 76% of symbols *wrong*. Chased this down before accepting it:
+  confirmed it's a quadrature/discretization problem (the discrete sum
+  is too coarse an approximation of the continuous matched-filter
+  integral at this sample density), not an aliasing problem (the
+  signal sits well inside the 8 kHz Nyquist bandwidth) and not fixed by
+  a wider filter span (tried `filterSpanSymbols=32`, 4x the default;
+  the error rate barely moved, from 216/284 to 211/284 wrong) -- only
+  raising samples/symbol fixed it. 4 new tests (223 total), including
+  one that deliberately pins the current ~76%-wrong number (see its own
+  comment) so a future change has to explain why that number moved,
+  rather than quietly loosening a tolerance until it passes.
+  **Consequence for the real target**: `V34QamDemodulator`, as it
+  stands, cannot decode real V.34-rate symbols from real 8 kHz call
+  audio -- it is not wired into `CallAudioBridge` and must not be,
+  yet. A real fix needs either a properly designed discrete-time
+  (fractionally-spaced) matched filter in place of this direct
+  closed-form evaluation, or an interpolation/upsampling stage ahead
+  of it; this is now the concrete next blocker on the path to clause
+  11.3's Phase 3 sequencing, ahead of (and a precondition for) the
+  adaptive equalizer, carrier recovery, shell mapping, and trellis
+  coding that were already known-missing.
 - **Hayes ATL/ATM (speaker volume/mode) and local audio monitoring,
   added (2026-10-19), separate from the V.34 work above.** User asked
   how to "hear the modem" the way a real modem's on-board speaker lets
@@ -1148,3 +1189,26 @@ equalizer, trellis coding) — V.8 only negotiates which of those to use
 next; it doesn't implement any of them, and genuine carrier/clock
 recovery at V.32bis/V.34's actual symbol rates and constellations is a
 separate, harder problem than this V.21-tuned fix solves.
+
+**Update (2026-10-24), since the above predates most of the actual
+clause 10/11 (Phase 2/Phase 3) work landed since**: `V34Phase2Handshake`
+(the Tone A/B + L1/L2 + INFO1a/INFO1c exchange) is implemented and
+described in full further up this file; `CallAudioBridge` wires L1 in
+and flags L2 as gated behind a config flag. Phase 3's own primitives —
+scrambler (clause 7), TRN generator (10.1.3.8), and a QAM
+modulator/demodulator pair (clause 5.2/5.3 symbol rate and carrier,
+SRRC pulse shaping) — now all exist in isolation, each loopback-tested
+before being combined with anything else, per this project's established
+discipline. The concrete next blocker, found by actually measuring
+the demodulator rather than assuming it would work, is described right
+above under "Fifth Phase 3 primitive": `V34QamDemodulator`'s naive
+closed-form matched filter cannot decode symbols at V.34's real 2400
+baud over this codebase's fixed 8 kHz sample rate (~3.33 samples/symbol
+is too coarse for its discrete quadrature), only at a lower,
+well-oversampled baud rate. The next implementation step is a properly
+designed discrete-time (fractionally-spaced) matched filter or an
+interpolation/upsampling stage ahead of the existing one — without
+that, clause 11.3's Phase 3 sequencing (PP/TRN/J/MD) and everything
+after it (adaptive equalizer, carrier recovery, shell mapping, trellis
+coding) has nothing reliable to build on, even in loopback, let alone
+over a real call.

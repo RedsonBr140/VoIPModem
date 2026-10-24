@@ -89,6 +89,7 @@
     <ClCompile Include="V34ConstellationTests.cpp" />
     <ClCompile Include="V34ScramblerTests.cpp" />
     <ClCompile Include="V34TrnTests.cpp" />
+    <ClCompile Include="V34QamDemodulatorTests.cpp" />
     <ClCompile Include="V34QamModulatorTests.cpp" />
     <ClCompile Include="DbpskTests.cpp" />
     <ClCompile Include="V34InfoSequenceTests.cpp" />

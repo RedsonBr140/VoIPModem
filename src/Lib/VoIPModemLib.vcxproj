@@ -88,6 +88,7 @@
     <ClInclude Include="Dsp\V34Constellation.h" />
     <ClInclude Include="Dsp\V34Scrambler.h" />
     <ClInclude Include="Dsp\V34Trn.h" />
+    <ClInclude Include="Dsp\V34QamDemodulator.h" />
     <ClInclude Include="Dsp\V34QamModulator.h" />
     <ClInclude Include="Dsp\DbpskModulator.h" />
     <ClInclude Include="Dsp\DbpskDemodulator.h" />
@@ -130,6 +131,7 @@
     <ClCompile Include="Dsp\V34Constellation.cpp" />
     <ClCompile Include="Dsp\V34Scrambler.cpp" />
     <ClCompile Include="Dsp\V34Trn.cpp" />
+    <ClCompile Include="Dsp\V34QamDemodulator.cpp" />
     <ClCompile Include="Dsp\V34QamModulator.cpp" />
     <ClCompile Include="Dsp\DbpskModulator.cpp" />
     <ClCompile Include="Dsp\DbpskDemodulator.cpp" />
