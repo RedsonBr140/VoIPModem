@@ -79,22 +79,12 @@ namespace voipmodem::dsp {
 //      the earlier per-symbol product directly.
 //
 // This is still NOT a real V.34 receiver, for the same reason
-// V34QamModulator is not yet wired into a real call: it does no
-// carrier-phase recovery and no symbol-timing recovery of its own. It
-// assumes the caller already knows both exactly -- specifically, that
-// sample 0 of `waveform` sits exactly `filterSpanSymbols` symbol
-// periods before symbol 0's center, the same convention
-// V34QamModulator::Modulate uses for its own output. That is true in a
-// lossless loopback test (modulate, then immediately demodulate the
-// exact same buffer) but would never be true on a real link, where the
-// far end's carrier phase and symbol clock are unknown and drifting. A
-// real V.34 receiver needs its own carrier recovery (akin to what
-// V8Handshake eventually needed for FSK, clause 9.6) and timing
-// recovery (akin to FskDemodulator's early-late gate, clause
-// 9.5/equalizer) before this class's approach could run on real call
-// audio -- neither exists yet. See V34QamDemodulatorTests.cpp for what
-// this version was actually measured to achieve at V.34's real
-// parameters versus the broken first attempt above.
+// V34QamModulator is not yet wired into a real call: it still does no
+// carrier-phase recovery at all (see "SYMBOL-TIMING RECOVERY" below for
+// the symbol-timing side, which this version now has in a limited
+// form). See V34QamDemodulatorTests.cpp for what this version was
+// actually measured to achieve at V.34's real parameters versus the
+// broken first attempt above.
 //
 // MEASURED RESULT, this version, at V.34's actual 2400 baud / 8 kHz /
 // 1800 Hz carrier: with the same rolloff (0.125) the modulator's own
@@ -113,6 +103,34 @@ namespace voipmodem::dsp {
 // symbol rate should use that rolloff (and the matching TX rolloff on
 // V34QamModulator -- matched filtering requires both sides to agree),
 // not the 0.125 default.
+//
+// SYMBOL-TIMING RECOVERY (added after the above, same investigation):
+// Demodulate() no longer assumes the exact analytic symbol position --
+// it tracks it with a non-data-aided Gardner timing-error detector
+// feeding a PI loop (same proportional+integral structure as
+// FskDemodulator's early-late gate, different error signal). Measured,
+// not assumed: this tolerates a REALISTIC symbol-clock mismatch between
+// what this object is told to expect and the waveform's actual rate --
+// tested up to +/-100 ppm (a generous real crystal-oscillator
+// tolerance) over an 800-symbol burst with zero added decode errors.
+// It does NOT, however, meaningfully fix not knowing where symbol 0
+// actually starts: a deliberate 1-sample shift of the whole waveform
+// still fails badly, for a reason specific to this implementation, not
+// a tuning shortfall -- shifting the raw waveform also rotates the
+// carrier phase used by Demodulate()'s own downconversion step (which
+// is referenced to each sample's absolute index), and with no
+// carrier-phase recovery anywhere in this codebase, that phase error
+// alone is enough to break decisions regardless of timing. In other
+// words: symbol-timing recovery and carrier-phase recovery are coupled
+// in this design, not independent problems that can be solved one at a
+// time against a realistic unknown-start-time scenario. See
+// V34QamDemodulatorTests.cpp's
+// Demodulate_SampleAlignmentShift_CoupledToUnrecoveredCarrierPhase_KnownLimitation
+// for the measurement, and do not attempt to fix that test by tuning
+// the Gardner loop further -- a two-stage (fast-acquisition,
+// then-narrow) gain schedule was tried and did not help, because the
+// problem is phase, not timing bandwidth. Carrier-phase recovery is
+// the next real prerequisite.
 class V34QamDemodulator {
 public:
     // Parameters must match the V34QamModulator that produced

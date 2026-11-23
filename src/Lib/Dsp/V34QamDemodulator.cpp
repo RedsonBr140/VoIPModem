@@ -90,6 +90,43 @@ double LanczosInterpolate(const std::vector<double>& signal, double position, in
     return sum;
 }
 
+// Gardner timing-error detector gains, same PI structure (and same
+// clamped, don't-let-one-bad-symbol-blow-up-the-loop philosophy) as
+// FskDemodulator's own early-late gate -- see that class's
+// kProportionalGain/kIntegralGain. Tuned empirically against a
+// deliberately mistimed/mistuned loopback (see
+// V34QamDemodulatorTests.cpp), not copied from FskDemodulator's values,
+// since the error signal and symbol structure here are different (a
+// non-data-aided Gardner TED over a QAM stream, not an FSK bit clock).
+// Gains tuned to be small enough that the loop stays silent (no added
+// decode errors) on an already-correctly-timed signal over a long
+// burst, where the only input driving it is the Gardner TED's ordinary
+// data-pattern-dependent noise, not a real error to correct -- a
+// larger gain was measured to "lock" faster but then random-walk the
+// position by several samples over the same burst, which is worse than
+// doing nothing. See the class comment's "SYMBOL-TIMING RECOVERY"
+// section for what this gain is and is not able to track, and why: a
+// two-stage (fast-acquisition then narrow-tracking) gain schedule was
+// tried and measured not to help, for a reason specific to this
+// implementation, not a tuning failure -- see that comment.
+constexpr double kGardnerProportionalGain = 0.0003;
+constexpr double kGardnerIntegralGain = 0.00002;
+constexpr double kMaxRateCorrectionFractionOfSymbol = 0.05;
+constexpr double kMaxProportionalNudgeFractionOfSymbol = 0.25;
+// The integral term is "leaky" (decayed slightly every symbol) rather
+// than a pure accumulator. A plain accumulator driven by a
+// non-data-aided TED's symbol-to-symbol noise (which is zero-MEAN at
+// true lock, but has real, data-pattern-dependent variance) performs a
+// random walk over a long burst with no restoring force -- measured
+// directly: even with the waveform's actual symbol rate exactly
+// matching what this object was told to expect (zero real drift to
+// correct), a pure accumulator wandered by 2-3 samples after ~2000
+// symbols. Decaying the integral state pulls it back toward zero
+// whenever the input isn't a PERSISTENT bias, while still letting it
+// settle at a nonzero steady state in response to a real, sustained
+// rate offset (see Demodulate_ToleratesSlowSymbolClockDrift).
+constexpr double kRateCorrectionDecayPerSymbol = 0.999;
+
 } // namespace
 
 V34QamDemodulator::V34QamDemodulator(double symbolRateHz, double carrierFrequencyHz, double rolloffFactor,
@@ -135,17 +172,59 @@ std::vector<std::pair<double, double>> V34QamDemodulator::Demodulate(const std::
     const auto qFiltered = Convolve(qRaw, taps, halfWidth);
 
     // Step 3: pick each symbol's value out of the now-baseband streams
-    // via fractional-sample interpolation. Same timing convention as
-    // V34QamModulator::Modulate: sample 0 is filterSpanSymbols_ symbol
-    // periods before symbol 0's center, so symbol k's center sample
-    // position is at t = (k + filterSpanSymbols_) * T.
+    // via fractional-sample interpolation, tracked with a Gardner
+    // timing loop rather than assuming the exact analytic symbol
+    // position -- see the class comment's "SYMBOL-TIMING RECOVERY"
+    // section. `symbolPositionSamples` starts at the same initial guess
+    // the earlier, non-recovering version always used (sample 0 is
+    // filterSpanSymbols_ symbol periods before symbol 0's center), but
+    // is then adjusted every symbol by a PI loop driven by the
+    // non-data-aided Gardner timing-error detector, so it can correct
+    // both an imperfect initial guess and a persistent symbol-rate
+    // mismatch between symbolRateHz_ (what this object was told to
+    // expect) and the waveform's actual, possibly slightly different,
+    // real symbol rate.
     constexpr int kLanczosA = 4;
+    const double nominalSamplesPerSymbol = sampleRate * T;
+    double symbolPositionSamples = filterSpanSymbols_ * nominalSamplesPerSymbol;
+    double rateCorrection = 0.0;
+    double runningPower = 1.0; // seeded away from 0 so early gain normalization isn't a divide-by-near-zero
+
+    double previousI = LanczosInterpolate(iFiltered, symbolPositionSamples - nominalSamplesPerSymbol, kLanczosA);
+    double previousQ = LanczosInterpolate(qFiltered, symbolPositionSamples - nominalSamplesPerSymbol, kLanczosA);
+
     for (int k = 0; k < numSymbols; ++k) {
-        const double tk = (k + filterSpanSymbols_) * T;
-        const double positionSamples = tk * sampleRate;
-        const double iHat = LanczosInterpolate(iFiltered, positionSamples, kLanczosA);
-        const double qHat = LanczosInterpolate(qFiltered, positionSamples, kLanczosA);
-        result.emplace_back(iHat, qHat);
+        const double currentI = LanczosInterpolate(iFiltered, symbolPositionSamples, kLanczosA);
+        const double currentQ = LanczosInterpolate(qFiltered, symbolPositionSamples, kLanczosA);
+
+        const double midPosition = symbolPositionSamples - nominalSamplesPerSymbol / 2.0;
+        const double midI = LanczosInterpolate(iFiltered, midPosition, kLanczosA);
+        const double midQ = LanczosInterpolate(qFiltered, midPosition, kLanczosA);
+
+        // Non-data-aided Gardner timing-error detector: Re{y_mid *
+        // conj(y_cur - y_prev)}. Positive when the current sampling
+        // instant is late relative to the true symbol transition
+        // nearest the midpoint, negative when early -- independent of
+        // carrier phase and of what was actually transmitted, which is
+        // why this works without a receive-side symbol decision.
+        const double error = midI * (currentI - previousI) + midQ * (currentQ - previousQ);
+
+        runningPower = 0.95 * runningPower + 0.05 * (currentI * currentI + currentQ * currentQ);
+        const double normalizedError = error / std::max(runningPower, 1e-9);
+
+        const double maxRateCorrection = kMaxRateCorrectionFractionOfSymbol * nominalSamplesPerSymbol;
+        rateCorrection =
+            std::clamp(kRateCorrectionDecayPerSymbol * rateCorrection + kGardnerIntegralGain * normalizedError,
+                       -maxRateCorrection, maxRateCorrection);
+        const double maxProportionalNudge = kMaxProportionalNudgeFractionOfSymbol * nominalSamplesPerSymbol;
+        const double proportionalNudge =
+            std::clamp(kGardnerProportionalGain * normalizedError, -maxProportionalNudge, maxProportionalNudge);
+
+        result.emplace_back(currentI, currentQ);
+
+        previousI = currentI;
+        previousQ = currentQ;
+        symbolPositionSamples += nominalSamplesPerSymbol + rateCorrection + proportionalNudge;
     }
 
     return result;

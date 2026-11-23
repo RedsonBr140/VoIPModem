@@ -1066,15 +1066,49 @@ effort, not a near-complete one:
   check is unchanged, one test pins the real-but-reduced ~8.5% residual
   at the original rolloff, and two confirm zero errors at rolloff 0.3 on
   both constellation sizes.
+  **Symbol-timing recovery added (2026-11-23), and a real architectural
+  coupling found while testing it.** `V34QamDemodulator::Demodulate` no
+  longer assumes the exact analytic symbol position -- it tracks it
+  with a non-data-aided Gardner timing-error detector feeding a PI loop
+  (same proportional+integral shape as `FskDemodulator`'s early-late
+  gate, a different error signal). Tuning this exposed a real,
+  measured acquisition-speed-vs-steady-state-noise tradeoff: a gain
+  large enough to quickly correct a deliberate several-sample
+  misalignment also random-walked an already-perfectly-aligned,
+  multi-thousand-symbol burst by 2-3 samples from the Gardner TED's
+  ordinary data-pattern-dependent noise alone (confirmed by watching
+  the tracked position drift with the actual symbol rate matching
+  exactly, i.e. nothing real to correct); a two-stage (fast-acquire,
+  then-narrow) gain schedule, the standard fix for that tradeoff, was
+  tried and measured not to help here (see below for why). Settled on
+  a single small, steady-state-safe gain.
+  **Measured result**: this tolerates a realistic symbol-clock
+  mismatch -- tested at +/-20/50/100 ppm (generous real
+  crystal-oscillator tolerances) over an 800-symbol burst with zero
+  added decode errors. It does NOT fix not knowing where symbol 0
+  actually starts: a deliberate 1-sample shift of the whole waveform
+  still fails badly (most symbols wrong), and a genuine architectural
+  finding explains why, not a tuning shortfall -- shifting the raw
+  waveform also rotates the carrier phase used by the downconversion
+  step (referenced to each sample's absolute index), and with no
+  carrier-phase recovery anywhere in this codebase, that phase error
+  alone is enough to break decisions regardless of timing accuracy.
+  **Symbol timing and carrier phase are coupled in this design, not
+  independent problems that can be solved one at a time** against a
+  realistic unknown-start-time scenario -- confirmed by testing (the
+  two-stage gain schedule mentioned above didn't help this case either,
+  because the problem it hits is phase, not timing-loop bandwidth). 4
+  new tests (227 total, all passing, 0 build warnings): realistic-drift
+  tolerance, and the sample-shift/carrier-phase-coupling finding pinned
+  as a known limitation. See `V34QamDemodulator.h`'s "SYMBOL-TIMING
+  RECOVERY" section for the full account.
   **Still not wired into `CallAudioBridge`, and still not a real
-  receiver** -- this result is from a lossless, phase/timing-known
-  loopback (see `V34QamDemodulator.h`'s class comment for exactly what
-  that does and doesn't prove). No carrier-phase recovery and no
-  symbol-timing recovery exist yet; both are real prerequisites before
-  any of this could run against actual call audio, where the far end's
-  carrier phase and symbol clock are unknown and drifting, not known
-  exactly the way this loopback assumes. That remains the next blocker
-  on the path to clause 11.3's Phase 3 sequencing, ahead of (and a
+  receiver.** No carrier-phase recovery exists yet at all, and per the
+  finding above, it is now the genuine next prerequisite -- not an
+  independent, parallel task to symbol-timing work, but a blocker for
+  making any further timing-recovery progress meaningful against a
+  realistic unknown-start-time scenario. That is the next blocker on
+  the path to clause 11.3's Phase 3 sequencing, ahead of (and a
   precondition for) the adaptive equalizer, shell mapping, and trellis
   coding that were already known-missing.
 - **Hayes ATL/ATM (speaker volume/mode) and local audio monitoring,
