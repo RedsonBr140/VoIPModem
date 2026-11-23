@@ -127,6 +127,53 @@ constexpr double kMaxProportionalNudgeFractionOfSymbol = 0.25;
 // rate offset (see Demodulate_ToleratesSlowSymbolClockDrift).
 constexpr double kRateCorrectionDecayPerSymbol = 0.999;
 
+// Carrier-phase recovery gains: a non-data-aided, 4th-power
+// ("Costas-like") phase-error detector feeding a PI loop, same overall
+// shape as the Gardner timing loop above (and FskDemodulator's
+// early-late gate) but tracking rotation instead of sample position.
+// Tuned the same way, against a deliberately phase-rotated loopback
+// (see V34QamDemodulatorTests.cpp) -- not copied from the Gardner
+// gains, since raising a complex sample to the 4th power scales its
+// magnitude by the power squared rather than linearly, so the natural
+// error-signal scale is very different.
+// A two-stage (fast-acquire, then-narrow) schedule was tried here too
+// (same idea as the Gardner loop's own, which didn't help ITS problem
+// -- see that comment -- but this is a different loop/problem, so it
+// was worth retesting on its own merits). Measured result: it did NOT
+// help -- a much larger acquisition-stage gain still left the
+// deliberately-misaligned test case barely improved within its
+// acquisition window, while simultaneously breaking the
+// already-correctly-phased tests the same way an over-large single
+// gain did before. Kept as one small, steady-state-safe gain; see the
+// class comment's "CARRIER-PHASE RECOVERY" section for what this
+// actually achieves and doesn't.
+constexpr double kPhaseProportionalGain = 0.001;
+constexpr double kPhaseIntegralGain = 0.0001;
+constexpr double kMaxFrequencyCorrectionRadiansPerSymbol = 0.2;
+constexpr double kMaxPhaseNudgeRadians = 0.5;
+// Same leaky-integrator reasoning as kRateCorrectionDecayPerSymbol
+// above, same measured justification: a pure accumulator here also
+// random-walked an already-correctly-phased signal over a long burst.
+constexpr double kFrequencyCorrectionDecayPerSymbol = 0.999;
+
+// The 4th-power detector's natural "zero error" reference point is NOT
+// always 0 radians -- it depends on the constellation's own intrinsic
+// angle. V34TrnGenerator's base point ("point 0" of the quarter
+// superconstellation, V34Constellation.cpp's kQuarterConstellation[0])
+// is exactly (1, 1), i.e. 45 degrees -- so for a correctly-phased
+// signal, 4*(45 + 90*k) = 180 + 360*k degrees for every rotation k the
+// scrambler happens to pick, a CONSTANT (data-independent, as
+// expected) but equal to 180 degrees, not 0. Measured directly before
+// this constant was accounted for: the raw detector output sat right
+// on atan2's +/-180-degree branch cut, which is numerically exactly
+// the wrong place to sit -- floating-point noise flips the sign
+// essentially at random there, which is why early testing without this
+// correction saw large, erratic, often-flipping error values even with
+// zero real carrier-phase error. Pre-rotating by this known reference
+// before the 4th power moves the expected lock point away from that
+// cut entirely.
+constexpr double kReferencePhaseRadians = kPi / 4.0;
+
 } // namespace
 
 V34QamDemodulator::V34QamDemodulator(double symbolRateHz, double carrierFrequencyHz, double rolloffFactor,
@@ -193,6 +240,15 @@ std::vector<std::pair<double, double>> V34QamDemodulator::Demodulate(const std::
     double previousI = LanczosInterpolate(iFiltered, symbolPositionSamples - nominalSamplesPerSymbol, kLanczosA);
     double previousQ = LanczosInterpolate(qFiltered, symbolPositionSamples - nominalSamplesPerSymbol, kLanczosA);
 
+    // Carrier-phase recovery state -- see the class comment's
+    // "CARRIER-PHASE RECOVERY" section. `carrierPhaseEstimate` is this
+    // loop's running estimate of the constant-or-slowly-varying
+    // rotation error left over from Step 1's downconversion (which has
+    // no way to know the far end's true carrier phase); every symbol's
+    // (currentI, currentQ) is de-rotated by it before being returned.
+    double carrierPhaseEstimate = 0.0;
+    double carrierFrequencyCorrection = 0.0;
+
     for (int k = 0; k < numSymbols; ++k) {
         const double currentI = LanczosInterpolate(iFiltered, symbolPositionSamples, kLanczosA);
         const double currentQ = LanczosInterpolate(qFiltered, symbolPositionSamples, kLanczosA);
@@ -220,11 +276,62 @@ std::vector<std::pair<double, double>> V34QamDemodulator::Demodulate(const std::
         const double proportionalNudge =
             std::clamp(kGardnerProportionalGain * normalizedError, -maxProportionalNudge, maxProportionalNudge);
 
-        result.emplace_back(currentI, currentQ);
-
         previousI = currentI;
         previousQ = currentQ;
         symbolPositionSamples += nominalSamplesPerSymbol + rateCorrection + proportionalNudge;
+
+        // De-rotate this symbol by the current carrier-phase estimate
+        // (multiplying the complex sample by e^{-j*carrierPhaseEstimate})
+        // *before* using it for anything else -- the 4th-power detector
+        // below is computed from the already-corrected value, which is
+        // what lets carrierPhaseEstimate converge (each update nudges
+        // toward zero residual error on the corrected signal, not the
+        // raw one).
+        const double cosPhase = std::cos(carrierPhaseEstimate);
+        const double sinPhase = std::sin(carrierPhaseEstimate);
+        const double rotatedI = currentI * cosPhase + currentQ * sinPhase;
+        const double rotatedQ = -currentI * sinPhase + currentQ * cosPhase;
+
+        // Non-data-aided 4th-power phase-error detector: for any
+        // constellation built, like V34TrnGenerator's, from a base
+        // point rotated by k*90 degrees (clause 10.1.3.8's quarter
+        // superconstellation), raising the de-rotated sample to the
+        // 4th power removes that 4-fold rotational symmetry entirely
+        // -- a correctly phased sample's 4th power lands at a FIXED
+        // angle (not necessarily 0; see kReferencePhaseRadians above),
+        // regardless of which of the 4 rotations the actual data
+        // happened to use. First pre-rotate by -kReferencePhaseRadians
+        // so that fixed angle becomes exactly 0 rather than landing on
+        // atan2's +/-180-degree branch cut (see kReferencePhaseRadians's
+        // own comment for why that matters numerically). atan2 of the
+        // result is then 4x the residual phase error (mod 2*pi);
+        // dividing by 4 recovers it, up to the inherent, unresolvable
+        // +/-90-degree-multiple ambiguity every M-th-power carrier
+        // recovery technique has (see the class comment -- fixing that
+        // needs a differentially-encoded or known reference symbol,
+        // neither of which exists here yet).
+        const double refCos = std::cos(kReferencePhaseRadians);
+        const double refSin = std::sin(kReferencePhaseRadians);
+        const double refI = rotatedI * refCos + rotatedQ * refSin;
+        const double refQ = -rotatedI * refSin + rotatedQ * refCos;
+        const double y2Re = refI * refI - refQ * refQ;
+        const double y2Im = 2.0 * refI * refQ;
+        const double y4Re = y2Re * y2Re - y2Im * y2Im;
+        const double y4Im = 2.0 * y2Re * y2Im;
+        const double phaseError = std::atan2(y4Im, y4Re) / 4.0; // atan2 is already magnitude-independent
+
+        carrierFrequencyCorrection =
+            std::clamp(kFrequencyCorrectionDecayPerSymbol * carrierFrequencyCorrection + kPhaseIntegralGain * phaseError,
+                       -kMaxFrequencyCorrectionRadiansPerSymbol, kMaxFrequencyCorrectionRadiansPerSymbol);
+        const double phaseNudge = std::clamp(kPhaseProportionalGain * phaseError, -kMaxPhaseNudgeRadians,
+                                              kMaxPhaseNudgeRadians);
+        carrierPhaseEstimate += carrierFrequencyCorrection + phaseNudge;
+        // Keep the running phase estimate bounded; it is used only
+        // through cos/sin, which are periodic, so wrapping changes
+        // nothing numerically.
+        carrierPhaseEstimate = std::fmod(carrierPhaseEstimate, kTwoPi);
+
+        result.emplace_back(rotatedI, rotatedQ);
     }
 
     return result;

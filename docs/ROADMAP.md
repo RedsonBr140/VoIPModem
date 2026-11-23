@@ -1102,15 +1102,99 @@ effort, not a near-complete one:
   tolerance, and the sample-shift/carrier-phase-coupling finding pinned
   as a known limitation. See `V34QamDemodulator.h`'s "SYMBOL-TIMING
   RECOVERY" section for the full account.
-  **Still not wired into `CallAudioBridge`, and still not a real
-  receiver.** No carrier-phase recovery exists yet at all, and per the
-  finding above, it is now the genuine next prerequisite -- not an
-  independent, parallel task to symbol-timing work, but a blocker for
-  making any further timing-recovery progress meaningful against a
-  realistic unknown-start-time scenario. That is the next blocker on
-  the path to clause 11.3's Phase 3 sequencing, ahead of (and a
-  precondition for) the adaptive equalizer, shell mapping, and trellis
-  coding that were already known-missing.
+  **Update: carrier-phase recovery landed the same day, see below --
+  it is no longer true that "no carrier-phase recovery exists at all."
+  Still not wired into `CallAudioBridge`, and still not a real
+  receiver**, for the reasons the entry right below explains.
+  **External-softmodem alternative investigated and rejected, same
+  day.** Before continuing with carrier-phase recovery, the user asked
+  whether VoIPModem could skip writing V.34 DSP entirely by either (a)
+  emulating an existing PCI softmodem chipset so a real Windows OEM
+  driver does the DSP, or (b) reusing D-Modem, which already combines
+  `slmodemd` with PJSIP to run real dial-up calls over SIP on Linux.
+  Researched both before writing any code, per CLAUDE.md's "prefer
+  established libraries... but verify, don't assume" discipline:
+  - (a) would need a kernel-mode PCI bus/device emulator plus
+    reverse-engineering an undocumented HSP chipset's register
+    protocol -- categorically harder and different work than DSP, with
+    no confirmed driver that even installs on the actual target
+    Windows Server version.
+  - (b) D-Modem (`AonCyberLabs`/`strozfriedberg`/`D-Modem`, GPL-2.0;
+    `synexo` fork) was already on file as a Phase 4 reference (see the
+    original library survey above) but re-checked directly against its
+    own READMEs rather than trusting an older summary: the **original
+    is dial-out only** -- its own Known Issues say "There is currently
+    no support for receiving calls." The **`synexo` fork adds answering
+    but calls it "buggy"** and warns it "might not make another call
+    after it has made one" -- a real problem for a modem bank handling
+    sequential calls. Its own best reliability claim ("V.34/V.90
+    usually successful") was measured against a Cisco 2951 with digital
+    modem cards and a **GPS-synced clock**, which lines up with this
+    project's own hard-won finding that V.34-over-VoIP is extremely
+    clock-sensitive (see the Gardner timing-recovery and carrier-phase
+    work in this same section). It's Linux-only (32-bit build), and its
+    only Windows angle is a Windows **guest** VM -- the opposite of what
+    this project needs. Adopting it would mean a Linux VM/container as
+    a hard runtime dependency, which conflicts with CLAUDE.md's Windows
+    Server 2003 deployment constraint (Hyper-V isn't available there).
+  **Decision: continue the from-scratch DSP path.** Not rejected by
+  assumption -- investigated with real sources (direct README reads),
+  and the from-scratch path was already measurably working piece by
+  piece (V.8, V.34 Phase 2 handshake, QAM mod/demod, Gardner timing
+  recovery) with no external VM or licensing dependency.
+  **Scope clarified by the user, same day: VoIPModem is a server-side
+  modem bank, not a PPP client or ATA/physical-modem replacement.** It
+  terminates SIP + the modem DSP itself and hands the resulting data
+  stream to the *same* Windows Server machine's own RRAS/PPP stack
+  through a virtual COM port, the way a real hardware modem bank would
+  -- Windows' existing RAS/PPP stack does the actual PPP session
+  (LCP/IPCP/authentication/IP assignment), not VoIPModem. This doesn't
+  change the DSP work still needed (real analog modems calling in still
+  need a real, working V.34 receiver), but it does rule out ever
+  building a custom PPP stack, a RAS dial-out client role, or any
+  GUI/general-purpose-ATA ambition -- see `docs/PROJECT_SPEC.md`-level
+  scope, not something to re-litigate.
+  **Carrier-phase recovery added (2026-11-23), with a real,
+  non-obvious bug found and fixed before it worked at all.**
+  `Demodulate()` now also runs a non-data-aided, 4th-power
+  ("Costas-like") phase-error detector feeding its own PI loop (same
+  shape as the Gardner timing loop). First attempt was unusable: large,
+  erratic, sign-flipping error even with zero real phase error to
+  correct. Root cause, found by measurement: the 4th-power detector's
+  "zero error" reference angle isn't always 0 -- it depends on the
+  constellation's own intrinsic angle, and V34TrnGenerator's base point
+  (`kQuarterConstellation[0]` = exactly `(1, 1)`, i.e. 45 degrees) puts
+  a correctly-phased signal's 4th power at a CONSTANT 180 degrees, not
+  0 -- landing right on atan2's +/-180-degree branch cut, where
+  floating-point noise flips the sign essentially at random. Fixed by
+  pre-rotating by that known reference angle before the 4th power, so
+  the true lock point sits away from the cut.
+  With that fixed, and gains tuned the same conservative way as
+  Gardner's (small enough to stay silent on an already-correctly-phased
+  signal -- a two-stage acquisition/tracking gain schedule was tried
+  here too and, unlike for Gardner, still didn't help; a much larger
+  acquisition-stage gain left the test case barely improved while
+  breaking the already-correct ones the same way an oversized single
+  gain did before), this loop: adds zero decode errors to every
+  already-correct-phase test in the file; and, measured on the
+  1-sample-shift scenario from the symbol-timing entry above (now
+  re-run over a longer, 1500-symbol burst), genuinely and monotonically
+  reduces decode errors over the burst -- ~95% wrong in the first
+  third, ~53% wrong in the last third. Real, measured progress, not
+  nothing -- but it does NOT converge fast enough to actually resolve
+  that scenario within a realistic burst length. 4 tests updated/added
+  (227 total, all passing, 0 build warnings).
+  **Conclusion for both loops**: symbol timing and carrier phase are no
+  longer "one doesn't exist at all" blocked on each other, but neither
+  loop, as currently tuned, can acquire a large/sudden initial
+  misalignment quickly -- both are built for already-close tracking,
+  not blind acquisition from a cold start. The realistic next step is a
+  separate, faster acquisition mechanism (e.g. a short known preamble
+  searched for at startup, the way `V8Handshake`'s own sync gate already
+  works), not further gain tuning on either loop -- that was tried
+  twice now (once for Gardner, once for carrier phase) and didn't help
+  either time, for related but distinct reasons documented in
+  `V34QamDemodulator.h`.
 - **Hayes ATL/ATM (speaker volume/mode) and local audio monitoring,
   added (2026-10-19), separate from the V.34 work above.** User asked
   how to "hear the modem" the way a real modem's on-board speaker lets

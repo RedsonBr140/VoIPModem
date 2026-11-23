@@ -4,7 +4,6 @@
 #include "TestFramework.h"
 
 #include <cmath>
-#include <cstdio>
 #include <vector>
 
 using namespace voipmodem::dsp;
@@ -280,34 +279,43 @@ TEST(Demodulate_ToleratesRealisticSymbolClockDrift) {
 }
 
 // A real, measured architectural finding from trying to test
-// symbol-timing recovery in isolation: in this implementation, symbol
-// timing and carrier phase are NOT independent. Digital downconversion
-// (Demodulate()'s step 1) multiplies the waveform by
+// symbol-timing recovery in isolation (before carrier-phase recovery
+// existed): in this implementation, symbol timing and carrier phase
+// are NOT independent. Digital downconversion (Demodulate()'s step 1)
+// multiplies the waveform by
 // cos/sin(2*pi*carrierFrequencyHz_*n/kSampleRateHz) -- an absolute
 // phase reference tied to each sample's raw index n. Shifting the
-// waveform in time by even one sample (simulating "the receiver's
-// symbol clock started counting one sample later than it should have")
-// does NOT just shift which part of the pulse gets sampled -- because
-// the carrier reference is still evaluated at the (now-wrong) raw
-// index, it ALSO rotates the carrier phase by
-// 2*pi*carrierFrequencyHz_/kSampleRateHz radians (~27 degrees at V.34's
-// 1800 Hz carrier and this codebase's 8 kHz rate) per sample of shift.
-// With no carrier-phase recovery in this codebase at all yet, that
-// phase error alone is enough to badly corrupt decisions, which is
-// exactly what this test confirms -- a 1-sample shift (with the Gardner
-// timing loop from the tests above fully active) still decodes most
-// symbols wrong, including many samples into the burst (not just at
-// the start, so this is a standing phase error, not a slow
-// acquisition). This means genuinely independent "symbol-timing-only"
-// recovery cannot be meaningfully exercised against a realistic
-// unknown-start-time scenario until carrier-phase recovery also exists
-// -- they are coupled in this design, not separable work items. Pinned
-// here as a known, found limitation (not a bug) so it isn't
-// rediscovered from scratch next session.
-TEST(Demodulate_SampleAlignmentShift_CoupledToUnrecoveredCarrierPhase_KnownLimitation) {
+// waveform in time by even one sample does NOT just shift which part
+// of the pulse gets sampled -- it ALSO rotates the carrier phase by
+// 2*pi*carrierFrequencyHz_/kSampleRateHz radians (~81 degrees at V.34's
+// 1800 Hz carrier and this codebase's 8 kHz rate -- corrected from an
+// earlier, wrong "~27 degrees" estimate in this comment's own history;
+// 2*pi*1800/8000 = 1.414 rad) per sample of shift.
+//
+// Carrier-phase recovery (the 4th-power Costas-style loop in
+// Demodulate(), see the class comment) now exists and measurably
+// chips away at exactly this error -- it does NOT just sit there
+// broken anymore, which this test confirms by comparing error counts
+// across the burst rather than asserting a single static number. But
+// it converges far too slowly to actually resolve a shift this large
+// within a realistic burst length: measured on a 1500-symbol burst,
+// split into thirds, errors drop from ~460/484 (~95%, first third) to
+// ~257/484 (~53%, last third) -- real, monotonic improvement, but
+// nowhere near usable. This is the same acquisition-speed-vs-
+// steady-state-noise tradeoff already documented for the Gardner
+// timing loop and the carrier-phase loop's own single-gain design (see
+// the class comment) -- a two-stage gain schedule was tried here too
+// and did not help (see kPhaseProportionalGain's own comment in the
+// .cpp). Symbol timing and carrier phase remain coupled in this
+// design, and neither loop, as currently tuned, can acquire a
+// multi-sample/large-phase initial error quickly -- both only really
+// work once already close to correct. Pinned here as a known,
+// measured limitation so it isn't rediscovered from scratch next
+// session.
+TEST(Demodulate_SampleAlignmentShift_CarrierPhaseLoopImprovesButDoesNotConverge_KnownLimitation) {
     V34TrnGenerator trn(V34ScramblerMode::AnswerMode, /*use16Point=*/false);
     std::vector<std::pair<int, int>> symbols;
-    for (int i = 0; i < 300; ++i) {
+    for (int i = 0; i < 1500; ++i) {
         symbols.push_back(trn.NextPoint());
     }
 
@@ -324,12 +332,24 @@ TEST(Demodulate_SampleAlignmentShift_CoupledToUnrecoveredCarrierPhase_KnownLimit
     V34QamDemodulator demodulator(nominalRate, carrierHz, rolloff, span);
     const auto recovered = demodulator.Demodulate(waveform, static_cast<int>(symbols.size()));
 
-    const double gain = EstimateGain(recovered, symbols);
     const auto alphabet = DistinctPoints(symbols);
-    const int errors = CountNearestNeighborDecodeErrors(recovered, symbols, alphabet, gain, /*margin=*/span);
-    const int total = static_cast<int>(symbols.size()) - 2 * span;
+    int errorsByThird[3] = {0, 0, 0};
+    for (int third = 0; third < 3; ++third) {
+        const size_t lo = static_cast<size_t>(third) * symbols.size() / 3 + static_cast<size_t>(span);
+        const size_t hi = static_cast<size_t>(third + 1) * symbols.size() / 3 - static_cast<size_t>(span);
+        std::vector<std::pair<double, double>> sub(recovered.begin() + lo, recovered.begin() + hi);
+        std::vector<std::pair<int, int>> subSymbols(symbols.begin() + lo, symbols.begin() + hi);
+        const double gain = EstimateGain(sub, subSymbols);
+        errorsByThird[third] = CountNearestNeighborDecodeErrors(sub, subSymbols, alphabet, gain, /*margin=*/0);
+    }
 
-    EXPECT_TRUE(errors > total / 2);
+    // Still mostly broken early (acquisition hasn't gotten anywhere
+    // close yet)...
+    EXPECT_TRUE(errorsByThird[0] > 400);
+    // ...but genuinely, substantially better by the end, not stuck...
+    EXPECT_TRUE(errorsByThird[2] < errorsByThird[0] - 100);
+    // ...while still nowhere near actually usable.
+    EXPECT_TRUE(errorsByThird[2] > 150);
 }
 
 TEST(Demodulate_ZeroSymbolsProducesEmptyOutput) {

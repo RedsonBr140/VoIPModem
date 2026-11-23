@@ -125,12 +125,51 @@ namespace voipmodem::dsp {
 // in this design, not independent problems that can be solved one at a
 // time against a realistic unknown-start-time scenario. See
 // V34QamDemodulatorTests.cpp's
-// Demodulate_SampleAlignmentShift_CoupledToUnrecoveredCarrierPhase_KnownLimitation
-// for the measurement, and do not attempt to fix that test by tuning
-// the Gardner loop further -- a two-stage (fast-acquisition,
-// then-narrow) gain schedule was tried and did not help, because the
-// problem is phase, not timing bandwidth. Carrier-phase recovery is
-// the next real prerequisite.
+// Demodulate_SampleAlignmentShift_CarrierPhaseLoopImprovesButDoesNotConverge_KnownLimitation
+// for the measurement (updated below, since carrier-phase recovery now
+// exists), and do not attempt to fix that test by tuning the Gardner
+// loop further -- a two-stage (fast-acquisition, then-narrow) gain
+// schedule was tried and did not help, because the problem there is
+// phase, not timing bandwidth.
+//
+// CARRIER-PHASE RECOVERY (added after the above, same investigation):
+// Demodulate() now also runs a non-data-aided, 4th-power
+// ("Costas-like") phase-error detector feeding its own PI loop (same
+// shape as the Gardner loop above), de-rotating every symbol by the
+// running phase estimate before returning it. Getting this right
+// needed a real, non-obvious correction, found by measurement, not
+// guessed: the 4th-power detector's "zero error" reference angle is
+// NOT always 0 -- it depends on the constellation's own intrinsic
+// angle. V34TrnGenerator's base point (kQuarterConstellation[0]) is
+// exactly (1, 1), i.e. 45 degrees, so a correctly-phased signal's 4th
+// power sits at a CONSTANT 180 degrees, not 0 -- which, left
+// uncorrected, put the raw detector output right on atan2's
+// +/-180-degree branch cut, flipping sign essentially at random from
+// floating-point noise alone. The fix: pre-rotate by this known
+// reference (kReferencePhaseRadians in the .cpp) before the 4th power,
+// moving the true lock point away from that cut. Without this fix the
+// loop was unusable -- large, erratic, sign-flipping error even with
+// zero real phase error to correct.
+// With that fixed and gains tuned the same way as Gardner's (small
+// enough to stay silent on an already-correctly-phased signal; a
+// two-stage schedule was tried here too and, unlike for Gardner, still
+// didn't help -- see kPhaseProportionalGain's own comment), this loop:
+// stays silent (no added decode errors) on every already-correct-phase
+// test in this file; and, measured on the 1-sample-shift scenario
+// above, genuinely and monotonically reduces decode errors over a long
+// (1500-symbol) burst (~95% wrong in the first third, ~53% wrong in
+// the last) -- real progress, not nothing. But it does NOT converge
+// fast enough to actually fix that scenario within a realistic burst
+// length. Symbol timing and carrier phase are no longer "blocked on
+// each other" in the sense of one not existing at all, but a
+// large/sudden initial misalignment in either is still not something
+// either loop, as currently tuned, can acquire quickly -- both are
+// built for already-close tracking, not blind acquisition. A faster,
+// separate acquisition mechanism (e.g. a short, known preamble searched
+// for at startup, the way V8Handshake's own sync gate works, rather
+// than relying on these two tracking loops to pull in a large error
+// from a cold start) is the realistic next step, not further gain
+// tuning on either loop.
 class V34QamDemodulator {
 public:
     // Parameters must match the V34QamModulator that produced
