@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <deque>
 #include <string>
+#include <vector>
 
 #include "../src/Lib/Core/ICallController.h"
 
@@ -40,6 +42,19 @@ public:
         const voipmodem::CallEvent event = queuedEvents.front();
         queuedEvents.pop_front();
         return event;
+    }
+
+    std::vector<std::uint8_t> sentData;
+    std::deque<std::uint8_t> queuedReceivedData;
+
+    void SendData(const std::vector<std::uint8_t>& bytes) override {
+        sentData.insert(sentData.end(), bytes.begin(), bytes.end());
+    }
+
+    std::vector<std::uint8_t> PollReceivedData() override {
+        std::vector<std::uint8_t> result(queuedReceivedData.begin(), queuedReceivedData.end());
+        queuedReceivedData.clear();
+        return result;
     }
 };
 

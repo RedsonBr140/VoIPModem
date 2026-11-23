@@ -42,6 +42,12 @@ public:
         return event;
     }
 
+    // No active call is ever established by this stub (see Dial()/
+    // Answer() above), so there is nothing to send data to or receive
+    // data from.
+    void SendData(const std::vector<std::uint8_t>&) override {}
+    std::vector<std::uint8_t> PollReceivedData() override { return {}; }
+
 private:
     TaggedLogger& logger_;
     std::optional<CallEvent> pendingEvent_;

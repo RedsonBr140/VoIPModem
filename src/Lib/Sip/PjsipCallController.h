@@ -50,6 +50,8 @@ public:
     void Answer() override;
     void HangUp() override;
     CallEvent PollEvent() override;
+    void SendData(const std::vector<std::uint8_t>& bytes) override;
+    std::vector<std::uint8_t> PollReceivedData() override;
 
     // Implementation detail exposed only so the nested pjsua2 Account/Call
     // subclasses (defined in the .cpp) can report back into this

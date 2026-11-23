@@ -83,15 +83,38 @@ void ModemInstance::RunLoop() {
     while (serialPort_.IsOpen() && !stopRequested_) {
         uint8_t byte = 0;
         if (serialPort_.ReadByte(byte)) {
-            session_.OnByteReceived(byte);
+            // Online data mode (see docs/ROADMAP.md Phase 4's V.21
+            // milestone): bytes typed into the serial port go straight
+            // to the active call's modem link instead of being parsed
+            // as an AT command. There is deliberately no +++ escape
+            // sequence back to command mode yet -- the only way out is
+            // the call ending (ATH, or the far end hanging up); see
+            // ModemState.h's own notes on what Phase 4 does and does
+            // not implement.
+            if (core_.CurrentState() == ModemState::OnlineData) {
+                callController_->SendData(std::vector<uint8_t>{byte});
+            } else {
+                session_.OnByteReceived(byte);
+            }
         }
         // A false return from ReadByte() is the expected outcome of the
         // port's read timeout when nothing arrived; IsOpen() is what
         // detects an actually closed/failed port.
 
+        PumpOnlineDataRx();
         PollCallEvents();
         PumpIncomingCallRinging();
         PumpDialAudioTrigger();
+    }
+}
+
+void ModemInstance::PumpOnlineDataRx() {
+    if (core_.CurrentState() != ModemState::OnlineData) {
+        return;
+    }
+    const std::vector<uint8_t> received = callController_->PollReceivedData();
+    if (!received.empty()) {
+        serialPort_.Write(received);
     }
 }
 

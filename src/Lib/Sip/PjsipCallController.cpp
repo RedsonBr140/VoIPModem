@@ -135,6 +135,20 @@ public:
         }
     }
 
+    // Forwards to audioBridge_ if it exists yet, no-ops otherwise --
+    // see ICallController::SendData/PollReceivedData's own comment for
+    // why bytes arriving before the bridge (or its data link) exists
+    // simply wait rather than being dropped: SendData() only drops a
+    // byte if there is no bridge AT ALL yet (media not started), not
+    // once there is one queued and waiting.
+    void EnqueueTxByte(std::uint8_t byte) {
+        if (audioBridge_) {
+            audioBridge_->EnqueueTxByte(byte);
+        }
+    }
+
+    std::vector<std::uint8_t> DrainRxBytes() { return audioBridge_ ? audioBridge_->DrainRxBytes() : std::vector<std::uint8_t>{}; }
+
 private:
     PjsipCallController::Impl& impl_;
     bool callingParty_;
@@ -301,6 +315,26 @@ void PjsipCallController::HangUp() {
 
 CallEvent PjsipCallController::PollEvent() {
     return impl_->PopEvent();
+}
+
+void PjsipCallController::SendData(const std::vector<std::uint8_t>& bytes) {
+    // Matches Dial()/Answer()/HangUp()'s existing convention of reading
+    // impl_->activeCall_ without taking mutex_ -- see Impl's own class
+    // comment: this is only ever called from the same ModemInstance
+    // thread that calls those, never from a pjsua2 callback.
+    if (!impl_->activeCall_) {
+        return;
+    }
+    for (std::uint8_t b : bytes) {
+        impl_->activeCall_->EnqueueTxByte(b);
+    }
+}
+
+std::vector<std::uint8_t> PjsipCallController::PollReceivedData() {
+    if (!impl_->activeCall_) {
+        return {};
+    }
+    return impl_->activeCall_->DrainRxBytes();
 }
 
 } // namespace voipmodem

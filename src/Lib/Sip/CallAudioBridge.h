@@ -1,12 +1,16 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
+#include <mutex>
 #include <optional>
 #include <vector>
 
 #include <pjsua2.hpp>
 
 #include "../Audio/WindowsAudioOutput.h"
+#include "../Dsp/FskDemodulator.h"
+#include "../Dsp/FskModulator.h"
 #include "../Dsp/V34Phase2Handshake.h"
 #include "../Dsp/V8Handshake.h"
 #include "../Logging/TaggedLogger.h"
@@ -49,6 +53,28 @@ namespace voipmodem {
 // just drain that buffer -- silence on the first frame or two if
 // onFrameRequested happens to fire before onFrameReceived ever has.
 //
+// DATA MODE (added for Phase 4's first real "modem talks to modem"
+// milestone -- see docs/ROADMAP.md): once `handshake_` reaches
+// Negotiated and the selected mode is V.21, this class stops running
+// V8Handshake (it has nothing left to do) and instead runs a real
+// bidirectional V.21 FSK data link -- the same `dsp::FskModulator`/
+// `FskDemodulator` pair this class used for an earlier probe-only
+// increment, now carrying actual application bytes instead of a
+// counter. Channel assignment matches V8Handshake's own convention:
+// the calling party transmits on channel 1 (980/1180 Hz) and listens
+// on channel 2 (1650/1850 Hz); the answering party is the mirror
+// image. `EnqueueTxByte`/`DrainRxBytes` are the only thread-safe
+// surface -- called from whatever thread owns the active
+// ICallController (ModemInstance's), while the actual modulation/
+// demodulation happens on pjsua2's own media thread inside
+// onFrameReceived/onFrameRequested. Bytes enqueued before the link
+// activates (i.e. before V8 finishes negotiating) simply wait in the
+// queue; nothing is dropped, so there is no race to get right between
+// CONNECT (reported as soon as SIP media is up -- see
+// ModemStateMachine) and the data link actually being ready a moment
+// later. V.34 never reaches this: Phase 2 line probing stops at L1
+// (see above), so V.34 calls never set dataLinkActive_.
+//
 // If `enableLocalAudio` is true, also mirrors every frame's RX+TX
 // audio to the local PC's default sound output device
 // (`WindowsAudioOutput`) -- the actual answer to "how do I hear the
@@ -73,6 +99,15 @@ public:
     // Throws pj::Error on failure.
     void Start(pj::AudioMedia& callAudio);
 
+    // Enqueues one byte for transmission once the V.21 data link is
+    // active (see class comment's "DATA MODE" section). Thread-safe;
+    // bytes enqueued before the link activates simply wait.
+    void EnqueueTxByte(std::uint8_t byte);
+
+    // Drains and returns every byte decoded from the far end since the
+    // last call. Thread-safe; returns empty if nothing new.
+    std::vector<std::uint8_t> DrainRxBytes();
+
 protected:
     void onFrameRequested(pj::MediaFrame& frame) override;
     void onFrameReceived(pj::MediaFrame& frame) override;
@@ -81,6 +116,19 @@ private:
     // Sums rxSamples and txSamples and writes the mix to localSpeaker_
     // (a no-op if no output device opened). See class comment.
     void PlayLocally(const std::vector<dsp::Sample>& rxSamples, const std::vector<dsp::Sample>& txSamples);
+
+    // Constructs dataModulator_/dataDemodulator_ with the correct
+    // channel assignment and sets dataLinkActive_ -- called exactly
+    // once, from onFrameReceived, the moment V8Handshake negotiates
+    // V.21. See class comment's "DATA MODE" section.
+    void StartDataLink();
+
+    // Runs the active V.21 data link for one frame: decodes any new
+    // bytes from rxSamples into rxByteQueue_, and refills
+    // pendingTxSamples_ (exactly sampleCount samples) from
+    // txByteQueue_, or a continuous mark/idle tone when that queue is
+    // empty. Called from onFrameReceived once dataLinkActive_ is true.
+    void RunDataLink(const std::vector<dsp::Sample>& rxSamples, int sampleCount);
 
     bool callingParty_;
     TaggedLogger& logger_;
@@ -92,6 +140,18 @@ private:
     bool loggedRtd_ = false;
     bool loggedL1_ = false;
     std::optional<WindowsAudioOutput> localSpeaker_; // only constructed if enableLocalAudio was true
+
+    // Data-mode state -- see class comment's "DATA MODE" section and
+    // StartDataLink()/RunDataLink()'s own comments.
+    bool dataLinkActive_ = false;
+    std::optional<dsp::FskModulator> dataModulator_;
+    std::optional<dsp::FskDemodulator> dataDemodulator_;
+    std::vector<dsp::Sample> dataTxSampleBuffer_; // generated-but-not-yet-sent TX audio
+    std::vector<bool> pendingRxBits_;              // decoded bits not yet assembled into a byte
+    size_t rxBitCursor_ = 0;                       // how far into pendingRxBits_ TryDecodeAsyncByte has consumed
+    std::mutex dataMutex_;                         // guards txByteQueue_/rxByteQueue_ only
+    std::deque<std::uint8_t> txByteQueue_;
+    std::deque<std::uint8_t> rxByteQueue_;
 };
 
 } // namespace voipmodem

@@ -1324,6 +1324,51 @@ effort, not a near-complete one:
   (`FskModulator`/`FskDemodulator`) already proven stable on a real
   call earlier in Phase 4 -- not full V.34 data mode, which still needs
   the acquisition rework below first.
+  **Built the same day.** `CallAudioBridge` now runs a real bidirectional
+  V.21 data link once `V8Handshake` negotiates V.21 (the only mode it
+  ever actually will, until V.34 data mode exists): `StartDataLink()`
+  constructs an `FskModulator`/`FskDemodulator` pair with the same
+  channel assignment `V8Handshake` already uses (calling party
+  transmits channel 1/listens channel 2; answering party the mirror
+  image), and `RunDataLink()` decodes arriving async-framed bytes into
+  a queue and keeps a TX sample buffer topped up from a second queue,
+  transmitting a continuous mark ("idle") tone between bytes exactly
+  as a real async line does. Both queues are mutex-guarded and
+  reachable from outside the class via new `EnqueueTxByte`/
+  `DrainRxBytes` methods -- necessary because pjsua2's media callbacks
+  run on PJSIP's own thread while the serial port is read on
+  `ModemInstance`'s.
+  `ICallController` gained `SendData`/`PollReceivedData` to carry this
+  up through `PjsipCallController` (which forwards to the active
+  call's bridge, following the same unlocked-`activeCall_`-access
+  convention `Dial`/`Answer`/`HangUp` already use) and down to
+  `NullCallController` (no-ops; it never has an active call).
+  `ModemInstance::RunLoop` now branches on `ModemState::OnlineData`:
+  serial bytes go to `SendData` instead of `CommandLineSession`, and
+  `PollReceivedData` drains straight back out to the serial port every
+  loop iteration. There is deliberately no `+++` escape sequence back
+  to command mode yet -- the only way out of data mode is the call
+  ending (`ATH`, or the far end hanging up).
+  **Known, deliberate simplification**: `ModemState::OnlineData` (and
+  the Hayes `CONNECT` it causes) is still driven purely by SIP media
+  confirmation (unchanged from Phase 2), not by `V8Handshake` actually
+  finishing -- a real modem's CONNECT means "the modem link is up",
+  which here can lag SIP's own CONNECT by the second or so V8
+  negotiation takes. This does not lose any bytes: they wait queued in
+  the call's audio bridge until the data link activates (see
+  `ICallController.h`'s own comment for the one narrow exception --
+  a byte sent in the brief window before PJSIP's media-active callback
+  constructs the bridge at all is dropped, not queued further back
+  than that). Making CONNECT wait for the real modem link would be
+  more accurate and is a reasonable future improvement, not attempted
+  here to keep this increment to one concrete thing. All 227 existing
+  tests still pass (0 build warnings); no new unit tests were added,
+  consistent with this codebase's existing practice of verifying
+  `CallAudioBridge`/`ModemInstance` live rather than in isolation (both
+  require a real PJSIP media subsystem to even construct). **Not yet
+  live-tested** -- that is the next step before this milestone can be
+  called done, per CLAUDE.md's rule against claiming a standard/feature
+  works without an actual interoperability test.
 - **Architectural reference found for V.34's still-open acquisition
   gap, independent of the above: BinModem (github.com/CasualArclamp/
   BinModem, GPL-3.0, Rust) — read for architecture only, same as

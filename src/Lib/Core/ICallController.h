@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
+#include <vector>
 
 #include "ResultCodes.h"
 
@@ -50,6 +52,28 @@ public:
     // pending. Safe to call frequently (e.g. once per serial read-loop
     // iteration) — implementations must not block here.
     virtual CallEvent PollEvent() = 0;
+
+    // Online-data-mode byte passthrough (Phase 4's first real "modem
+    // talks to modem" milestone — see docs/ROADMAP.md). Once a call
+    // reaches ModemState::OnlineData, bytes arriving on the serial port
+    // are handed here instead of being parsed as AT commands, and bytes
+    // the far end's modulation has actually decoded are drained back out
+    // via PollReceivedData(). Both are fire-and-forget/non-blocking, same
+    // spirit as Dial()/Answer(): a real implementation (PjsipCallController)
+    // only *queues* bytes here — whether and when they actually leave over
+    // the wire depends on the call's own modem link (e.g. V.21 FSK) having
+    // finished negotiating, which can lag slightly behind CONNECT. Once the
+    // call's audio bridge exists, nothing queued there is dropped by that
+    // wait — it just sits until the link activates. There is one narrow
+    // exception: PjsipCallController's own audio bridge is only constructed
+    // once PJSIP reports call media active, a moment that can trail the
+    // SIP-level CONFIRMED this interface's Connected event already fired
+    // on; a byte sent in that brief window (bridge not constructed yet) is
+    // dropped, not queued further back than that. The no-SIP-backend stub
+    // (NullCallController) never has an active call, so both are no-ops
+    // there.
+    virtual void SendData(const std::vector<std::uint8_t>& bytes) = 0;
+    virtual std::vector<std::uint8_t> PollReceivedData() = 0;
 };
 
 } // namespace voipmodem

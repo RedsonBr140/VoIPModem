@@ -56,6 +56,15 @@ private:
     void PumpIncomingCallRinging();
     void PumpDialAudioTrigger();
 
+    // Online-data-mode byte passthrough (see docs/ROADMAP.md Phase 4's
+    // V.21 data-mode milestone): drains whatever the active call's
+    // modem link has actually decoded since the last iteration and
+    // writes it straight to the serial port. The other direction
+    // (serial -> call) is simpler and handled inline in RunLoop(), not
+    // a separate method, since it only needs the one byte RunLoop just
+    // read.
+    void PumpOnlineDataRx();
+
     // Plays a dial tone followed by each digit of `number` as a DTMF
     // tone, purely a local cosmetic cue for a human listening via
     // `dialAudio_` -- there's no physical line to produce a real dial

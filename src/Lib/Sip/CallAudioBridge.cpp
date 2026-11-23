@@ -13,6 +13,18 @@ constexpr int kBitsPerSample = 16;
 constexpr int kFrameTimeUsec = 20000; // 20ms -> 160 samples at 8kHz
 constexpr dsp::Sample kV34NominalAmplitude = 0.8f;
 
+// Same V.21 channel table and baud rate V8Handshake already uses
+// (confirmed against V.21's own frequency table, not re-derived here --
+// see FskModulator.h's own class comment) -- duplicated rather than
+// shared across translation units, matching this codebase's existing
+// style (V8Handshake.cpp keeps its own copy too).
+constexpr double kChannel1MarkHz = 980.0;
+constexpr double kChannel1SpaceHz = 1180.0;
+constexpr double kChannel2MarkHz = 1650.0;
+constexpr double kChannel2SpaceHz = 1850.0;
+constexpr double kDataBaudRate = 300.0;
+constexpr dsp::Sample kDataAmplitude = 0.6f;
+
 int16_t FloatToPcm16(float sample) {
     const float clamped = std::clamp(sample, -1.0f, 1.0f);
     return static_cast<int16_t>(clamped * 32767.0f);
@@ -154,6 +166,15 @@ void CallAudioBridge::onFrameReceived(pj::MediaFrame& frame) {
         return;
     }
 
+    // Once V8 has handed off to the real V.21 data link, that owns this
+    // call's audio from here on too -- V8Handshake has nothing left to
+    // do once Negotiated. See class comment's "DATA MODE" section.
+    if (dataLinkActive_) {
+        RunDataLink(samples, static_cast<int>(sampleCount));
+        PlayLocally(samples, pendingTxSamples_);
+        return;
+    }
+
     handshake_.ProcessFrame(samples, pendingTxSamples_, static_cast<int>(sampleCount));
     PlayLocally(samples, pendingTxSamples_);
 
@@ -173,8 +194,87 @@ void CallAudioBridge::onFrameReceived(pj::MediaFrame& frame) {
                                                     : dsp::V34Phase2Handshake::Role::AnswerDce,
                                       kV34NominalAmplitude, logger_);
             logger_.Info("CallAudioBridge: starting V.34 Phase 2 line probing");
+        } else if (selected.has_value() && selected.value() == dsp::V8ModulationModeItem::V21) {
+            StartDataLink();
         }
     }
+}
+
+void CallAudioBridge::StartDataLink() {
+    // Same channel assignment V8Handshake already uses: the calling
+    // party transmits on channel 1 and listens on channel 2; the
+    // answering party is the mirror image.
+    const double txMark = callingParty_ ? kChannel1MarkHz : kChannel2MarkHz;
+    const double txSpace = callingParty_ ? kChannel1SpaceHz : kChannel2SpaceHz;
+    const double rxMark = callingParty_ ? kChannel2MarkHz : kChannel1MarkHz;
+    const double rxSpace = callingParty_ ? kChannel2SpaceHz : kChannel1SpaceHz;
+
+    dataModulator_.emplace(txMark, txSpace, kDataBaudRate, kDataAmplitude, dsp::kSampleRateHz);
+    dataDemodulator_.emplace(rxMark, rxSpace, kDataBaudRate, dsp::kSampleRateHz);
+    dataLinkActive_ = true;
+    logger_.Info("CallAudioBridge: V.21 data link active -- real byte passthrough now running");
+}
+
+void CallAudioBridge::RunDataLink(const std::vector<dsp::Sample>& rxSamples, int sampleCount) {
+    // RX: decode new bits, assemble async-framed bytes from them, and
+    // queue whatever comes out for the application to drain.
+    const auto newBits = dataDemodulator_->ProcessSamples(rxSamples);
+    pendingRxBits_.insert(pendingRxBits_.end(), newBits.begin(), newBits.end());
+    for (;;) {
+        if (pendingRxBits_.size() - rxBitCursor_ < 10) {
+            break; // not enough bits yet for even one async-framed byte
+        }
+        const auto decoded = dsp::FskDemodulator::TryDecodeAsyncByte(pendingRxBits_, rxBitCursor_);
+        if (decoded.has_value()) {
+            std::lock_guard<std::mutex> lock(dataMutex_);
+            rxByteQueue_.push_back(*decoded);
+            continue;
+        }
+        ++rxBitCursor_; // genuine framing mismatch (wrong start/stop bit) -- resync by one bit
+    }
+    // Periodically compact pendingRxBits_ so it doesn't grow without
+    // bound over a long call -- same technique this codebase already
+    // used for this exact purpose in an earlier increment (see
+    // docs/ROADMAP.md Phase 4).
+    if (rxBitCursor_ > 4096) {
+        pendingRxBits_.erase(pendingRxBits_.begin(), pendingRxBits_.begin() + static_cast<long>(rxBitCursor_));
+        rxBitCursor_ = 0;
+    }
+
+    // TX: keep dataTxSampleBuffer_ topped up to at least sampleCount,
+    // generating from queued application bytes when there are any, or
+    // a continuous mark ("idle") tone otherwise -- exactly what a real
+    // async line does between bytes.
+    while (dataTxSampleBuffer_.size() < static_cast<size_t>(sampleCount)) {
+        std::optional<std::uint8_t> nextByte;
+        {
+            std::lock_guard<std::mutex> lock(dataMutex_);
+            if (!txByteQueue_.empty()) {
+                nextByte = txByteQueue_.front();
+                txByteQueue_.pop_front();
+            }
+        }
+        if (nextByte.has_value()) {
+            dataModulator_->ModulateByteAsync(dataTxSampleBuffer_, *nextByte);
+        } else {
+            dataModulator_->ModulateBit(dataTxSampleBuffer_, /*bit=*/true); // mark = idle
+        }
+    }
+
+    pendingTxSamples_.assign(dataTxSampleBuffer_.begin(), dataTxSampleBuffer_.begin() + sampleCount);
+    dataTxSampleBuffer_.erase(dataTxSampleBuffer_.begin(), dataTxSampleBuffer_.begin() + sampleCount);
+}
+
+void CallAudioBridge::EnqueueTxByte(std::uint8_t byte) {
+    std::lock_guard<std::mutex> lock(dataMutex_);
+    txByteQueue_.push_back(byte);
+}
+
+std::vector<std::uint8_t> CallAudioBridge::DrainRxBytes() {
+    std::lock_guard<std::mutex> lock(dataMutex_);
+    std::vector<std::uint8_t> result(rxByteQueue_.begin(), rxByteQueue_.end());
+    rxByteQueue_.clear();
+    return result;
 }
 
 } // namespace voipmodem
