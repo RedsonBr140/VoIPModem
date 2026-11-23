@@ -39,27 +39,80 @@ namespace voipmodem::dsp {
 // same way V8Handshake's own loopback test (TX fed directly into RX,
 // no real audio path) was run before any live-call test was attempted.
 //
-// KNOWN, MEASURED LIMITATION (not a bug; see
-// V34QamDemodulatorTests.cpp's Demodulate_AtActualV34SymbolRate_...
-// test for the measurement): this class's direct closed-form-pulse
-// matched filter only works well when the sample rate comfortably
-// oversamples the symbol rate. At V.34's own actual operating point --
-// 2400 baud over this codebase's fixed 8 kHz sample rate (kSampleRateHz,
-// DspTypes.h), i.e. only ~3.33 samples per symbol -- the discrete sum
-// used here is too coarse a quadrature of the true matched-filter
-// integral, and produces severe residual ISI (~76% of symbols decoded
-// to the wrong constellation point on a real 16-point TRN burst, as
-// measured). This was confirmed to be a quadrature/discretization
-// problem, not an aliasing problem (the signal itself sits well inside
-// the 8 kHz Nyquist bandwidth) and not fixed by a wider
-// filterSpanSymbols (tried 4x the default span; barely moved the
-// error rate) -- the same code decodes perfectly at a lower baud rate
-// with more samples/symbol. A real fix needs either a properly
-// designed discrete-time (fractionally-spaced) matched filter instead
-// of this direct closed-form evaluation, or an interpolation/
-// upsampling stage ahead of it; neither exists yet. Do not wire this
-// into CallAudioBridge or claim it can decode real V.34-rate symbols
-// until one of those is built and re-measured.
+// FIRST VERSION'S FINDING, FIXED BELOW -- kept here because it explains
+// why this class is built the way it is, not the naive way: a first
+// implementation evaluated the matched filter as
+// sum_n waveform[n] * h(t_n - t_k) directly, per symbol k, using the
+// closed-form SRRC formula at each symbol's own (generally fractional)
+// real-valued offset. That produced severe residual ISI at V.34's
+// actual 2400 baud / 8 kHz rate (~3.33 samples/symbol) -- confirmed via
+// measurement to be neither a logic bug nor an aliasing problem (the
+// signal itself sits well inside the 8 kHz Nyquist bandwidth), but a
+// genuine quadrature artifact: the quantity actually being summed,
+// waveform(t)*h(t-t_k), is a PRODUCT of two band-limited signals (the
+// received passband signal and the shifted pulse), and such a product
+// can occupy close to the SUM of their two bandwidths -- which, worked
+// out numerically, exceeds the 8 kHz Nyquist limit here even though
+// each factor alone does not. A per-symbol Riemann sum of real samples
+// against that over-wide product has no reason to converge, and
+// measurably didn't (~76% of symbols decoded wrong on a real 16-point
+// TRN burst; a much wider filterSpanSymbols barely helped, which is
+// consistent with this being a quadrature problem rather than a
+// truncation one).
+//
+// This version avoids that failure mode by never forming that product
+// at a per-symbol level at all. It separates the two operations a real
+// fractionally-spaced receiver keeps separate:
+//   1. Digital downconversion, then an ordinary FIXED discrete-time FIR
+//      filter (matched to the SRRC pulse, taps sampled once at
+//      kSampleRateHz) applied by normal convolution across every sample
+//      -- producing continuous, genuinely baseband (bandwidth limited
+//      to the RC mask, comfortably inside 8 kHz Nyquist on its own) I/Q
+//      streams at the full 8 kHz rate. No fractional offsets appear
+//      anywhere in this step, so there is no over-wide product to
+//      alias.
+//   2. A separate windowed-sinc (Lanczos) fractional-sample
+//      interpolator picks the symbol-rate value out of those already-
+//      baseband streams at each symbol's (generally non-integer)
+//      sample position. Interpolating a signal that is itself safely
+//      within Nyquist is a well-conditioned problem, unlike evaluating
+//      the earlier per-symbol product directly.
+//
+// This is still NOT a real V.34 receiver, for the same reason
+// V34QamModulator is not yet wired into a real call: it does no
+// carrier-phase recovery and no symbol-timing recovery of its own. It
+// assumes the caller already knows both exactly -- specifically, that
+// sample 0 of `waveform` sits exactly `filterSpanSymbols` symbol
+// periods before symbol 0's center, the same convention
+// V34QamModulator::Modulate uses for its own output. That is true in a
+// lossless loopback test (modulate, then immediately demodulate the
+// exact same buffer) but would never be true on a real link, where the
+// far end's carrier phase and symbol clock are unknown and drifting. A
+// real V.34 receiver needs its own carrier recovery (akin to what
+// V8Handshake eventually needed for FSK, clause 9.6) and timing
+// recovery (akin to FskDemodulator's early-late gate, clause
+// 9.5/equalizer) before this class's approach could run on real call
+// audio -- neither exists yet. See V34QamDemodulatorTests.cpp for what
+// this version was actually measured to achieve at V.34's real
+// parameters versus the broken first attempt above.
+//
+// MEASURED RESULT, this version, at V.34's actual 2400 baud / 8 kHz /
+// 1800 Hz carrier: with the same rolloff (0.125) the modulator's own
+// historical tests use, residual ISI is real but much smaller than the
+// first version's (~8.5% of symbols wrong on a 1000-symbol 4-point
+// burst, versus ~76% before). With rolloff raised to 0.3 -- still a
+// free implementation choice, not something clause 5.4.1 mandates --
+// it decodes PERFECTLY (0 symbol errors) on both a 4-point and a
+// 16-point burst at this exact symbol rate/carrier/sample rate. A
+// rolloff sweep found a wide, robust working range (~0.28-0.48) with
+// two narrow, explainable failure points at exactly 0.25 and 0.5 (the
+// RC bandwidth landing where the downconversion image aliases back
+// into the wanted band) -- stay away from those two exact values, and
+// 0.3 is a safe, tested choice well clear of both. Any future code that
+// wires this demodulator into a real V.34 Phase 3 signal at this
+// symbol rate should use that rolloff (and the matching TX rolloff on
+// V34QamModulator -- matched filtering requires both sides to agree),
+// not the 0.125 default.
 class V34QamDemodulator {
 public:
     // Parameters must match the V34QamModulator that produced

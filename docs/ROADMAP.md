@@ -1018,14 +1018,64 @@ effort, not a near-complete one:
   comment) so a future change has to explain why that number moved,
   rather than quietly loosening a tolerance until it passes.
   **Consequence for the real target**: `V34QamDemodulator`, as it
-  stands, cannot decode real V.34-rate symbols from real 8 kHz call
-  audio -- it is not wired into `CallAudioBridge` and must not be,
-  yet. A real fix needs either a properly designed discrete-time
-  (fractionally-spaced) matched filter in place of this direct
-  closed-form evaluation, or an interpolation/upsampling stage ahead
-  of it; this is now the concrete next blocker on the path to clause
-  11.3's Phase 3 sequencing, ahead of (and a precondition for) the
-  adaptive equalizer, carrier recovery, shell mapping, and trellis
+  stood, could not decode real V.34-rate symbols from real 8 kHz call
+  audio -- it was not wired into `CallAudioBridge`. A real fix needed
+  either a properly designed discrete-time (fractionally-spaced)
+  matched filter in place of this direct closed-form evaluation, or an
+  interpolation/upsampling stage ahead of it.
+  **That fix, built and measured (2026-11-23).** Rebuilt
+  `V34QamDemodulator` around the fractionally-spaced design: (1) digital
+  downconversion, (2) a FIXED discrete-time FIR matched filter (taps
+  sampled once from the SRRC closed form at `kSampleRateHz`, applied by
+  ordinary integer-indexed convolution -- no fractional evaluation
+  anywhere in this step), producing clean, genuinely baseband
+  (bandwidth-limited) I/Q streams at the full sample rate, then (3) a
+  Lanczos (windowed-sinc) fractional-sample interpolator to pick each
+  symbol's value out of those streams at its own, generally non-integer
+  sample position. This separates "filtering" (an ordinary, safe
+  discrete convolution) from "resampling to the symbol instant"
+  (interpolating an already-safely-band-limited signal), avoiding the
+  previous version's mistake: evaluating `waveform(t) * h(t - t_k)`
+  directly per symbol formed a PRODUCT of two band-limited signals,
+  which can occupy close to the SUM of their bandwidths -- worked out
+  numerically, enough to exceed the 8 kHz Nyquist limit even though
+  each signal alone did not, explaining the earlier ~76% error rate as
+  a real, previously-undiagnosed aliasing mechanism, not mere
+  discretization noise.
+  Measured, not assumed: on the same 16-point/300-symbol loopback, the
+  redesign alone (still at the original rolloff of 0.125) cut the error
+  from 216/284 (~76%) to 59/284 (~21%) -- a real improvement, but not a
+  fix by itself. Widening `filterSpanSymbols` further (span 12, 16)
+  barely moved it (51-54/~270 wrong), ruling out plain truncation as
+  the remaining cause. A rolloff sweep at the real 2400-baud/1800 Hz
+  parameters (span 8/12/16, rolloff 0.15 through 0.5) found a wide,
+  robust range (~0.28-0.48) with **zero** decode errors on both a
+  4-point (1000-symbol) and a 16-point (300-symbol) burst, bracketed by
+  two narrow, explainable failure points at exactly rolloff 0.25 and
+  0.5: both are where the RC pulse's own bandwidth
+  (`(1+rolloff)*symbolRate/2`) puts the downconversion's image (at 2x
+  the 1800 Hz carrier) close enough to alias back across the 8 kHz
+  Nyquist boundary into the wanted band -- a real, identified resonance,
+  not noise. **0.3 is the now-recommended rolloff** for any future code
+  wiring this into a real V.34 Phase 3 signal at this symbol rate (both
+  `V34QamModulator` and `V34QamDemodulator` must agree, since matched
+  filtering requires it); the classes' shared 0.125 default constructor
+  argument was deliberately left alone, since clause 5.4.1 still doesn't
+  mandate a rolloff and nothing yet calls these classes without passing
+  one explicitly. 4 new/rewritten tests (225 total): the 400-baud sanity
+  check is unchanged, one test pins the real-but-reduced ~8.5% residual
+  at the original rolloff, and two confirm zero errors at rolloff 0.3 on
+  both constellation sizes.
+  **Still not wired into `CallAudioBridge`, and still not a real
+  receiver** -- this result is from a lossless, phase/timing-known
+  loopback (see `V34QamDemodulator.h`'s class comment for exactly what
+  that does and doesn't prove). No carrier-phase recovery and no
+  symbol-timing recovery exist yet; both are real prerequisites before
+  any of this could run against actual call audio, where the far end's
+  carrier phase and symbol clock are unknown and drifting, not known
+  exactly the way this loopback assumes. That remains the next blocker
+  on the path to clause 11.3's Phase 3 sequencing, ahead of (and a
+  precondition for) the adaptive equalizer, shell mapping, and trellis
   coding that were already known-missing.
 - **Hayes ATL/ATM (speaker volume/mode) and local audio monitoring,
   added (2026-10-19), separate from the V.34 work above.** User asked
@@ -1205,10 +1255,31 @@ above under "Fifth Phase 3 primitive": `V34QamDemodulator`'s naive
 closed-form matched filter cannot decode symbols at V.34's real 2400
 baud over this codebase's fixed 8 kHz sample rate (~3.33 samples/symbol
 is too coarse for its discrete quadrature), only at a lower,
-well-oversampled baud rate. The next implementation step is a properly
-designed discrete-time (fractionally-spaced) matched filter or an
-interpolation/upsampling stage ahead of the existing one — without
-that, clause 11.3's Phase 3 sequencing (PP/TRN/J/MD) and everything
-after it (adaptive equalizer, carrier recovery, shell mapping, trellis
-coding) has nothing reliable to build on, even in loopback, let alone
-over a real call.
+well-oversampled baud rate.
+
+**Update (2026-11-23): that blocker is fixed, measured, and now has a
+recommended rolloff.** See "Fifth Phase 3 primitive" above for the full
+account. `V34QamDemodulator` was rebuilt around a genuinely
+fractionally-spaced design (fixed discrete FIR matched filter + Lanczos
+fractional-sample interpolation, instead of evaluating the matched
+filter per symbol via the closed-form pulse directly — the latter was
+root-caused to an aliasing mechanism, not mere coarse quadrature: the
+per-symbol product of two band-limited signals can occupy close to the
+sum of their bandwidths, enough to exceed 8 kHz Nyquist even though
+neither signal alone does). That alone cut the error rate at V.34's
+real parameters from ~76% to ~21% (16-point burst) / ~8.5% (4-point
+burst, both at the original 0.125 rolloff) — real, but not a full fix.
+A rolloff sweep at the real parameters found a wide, robust range
+(~0.28-0.48, with 0.3 recommended) that decodes with **zero** errors on
+both constellation sizes, plus two narrow, explained failure points
+(exactly 0.25 and 0.5) to avoid. This is still a lossless,
+phase/timing-known loopback result, not a real-link one -- the next
+blocker is unchanged: no carrier-phase recovery and no symbol-timing
+recovery exist yet, both real prerequisites before any of this could
+run against actual call audio, where the far end's carrier phase and
+symbol clock are unknown and drifting rather than known exactly the way
+this loopback assumes. Without at least a first cut at those two, even
+clause 11.3's Phase 3 sequencing (PP/TRN/J/MD) has nothing reliable to
+sequence over a real call, let alone the adaptive equalizer, shell
+mapping, and trellis coding still further out. That is the recommended
+next step.
