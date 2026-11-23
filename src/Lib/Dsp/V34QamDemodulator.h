@@ -113,24 +113,11 @@ namespace voipmodem::dsp {
 // what this object is told to expect and the waveform's actual rate --
 // tested up to +/-100 ppm (a generous real crystal-oscillator
 // tolerance) over an 800-symbol burst with zero added decode errors.
-// It does NOT, however, meaningfully fix not knowing where symbol 0
-// actually starts: a deliberate 1-sample shift of the whole waveform
-// still fails badly, for a reason specific to this implementation, not
-// a tuning shortfall -- shifting the raw waveform also rotates the
-// carrier phase used by Demodulate()'s own downconversion step (which
-// is referenced to each sample's absolute index), and with no
-// carrier-phase recovery anywhere in this codebase, that phase error
-// alone is enough to break decisions regardless of timing. In other
-// words: symbol-timing recovery and carrier-phase recovery are coupled
-// in this design, not independent problems that can be solved one at a
-// time against a realistic unknown-start-time scenario. See
-// V34QamDemodulatorTests.cpp's
-// Demodulate_SampleAlignmentShift_CarrierPhaseLoopImprovesButDoesNotConverge_KnownLimitation
-// for the measurement (updated below, since carrier-phase recovery now
-// exists), and do not attempt to fix that test by tuning the Gardner
-// loop further -- a two-stage (fast-acquisition, then-narrow) gain
-// schedule was tried and did not help, because the problem there is
-// phase, not timing bandwidth.
+// It does NOT fix not knowing where symbol 0 actually starts -- a
+// deliberate 1-sample shift of the whole waveform still fails badly.
+// This was originally (wrongly) attributed to carrier-phase coupling;
+// see "ACQUISITION" below for the corrected diagnosis, found by
+// actually measuring it rather than re-asserting the first guess.
 //
 // CARRIER-PHASE RECOVERY (added after the above, same investigation):
 // Demodulate() now also runs a non-data-aided, 4th-power
@@ -149,27 +136,49 @@ namespace voipmodem::dsp {
 // reference (kReferencePhaseRadians in the .cpp) before the 4th power,
 // moving the true lock point away from that cut. Without this fix the
 // loop was unusable -- large, erratic, sign-flipping error even with
-// zero real phase error to correct.
-// With that fixed and gains tuned the same way as Gardner's (small
-// enough to stay silent on an already-correctly-phased signal; a
-// two-stage schedule was tried here too and, unlike for Gardner, still
-// didn't help -- see kPhaseProportionalGain's own comment), this loop:
-// stays silent (no added decode errors) on every already-correct-phase
-// test in this file; and, measured on the 1-sample-shift scenario
-// above, genuinely and monotonically reduces decode errors over a long
-// (1500-symbol) burst (~95% wrong in the first third, ~53% wrong in
-// the last) -- real progress, not nothing. But it does NOT converge
-// fast enough to actually fix that scenario within a realistic burst
-// length. Symbol timing and carrier phase are no longer "blocked on
-// each other" in the sense of one not existing at all, but a
-// large/sudden initial misalignment in either is still not something
-// either loop, as currently tuned, can acquire quickly -- both are
-// built for already-close tracking, not blind acquisition. A faster,
-// separate acquisition mechanism (e.g. a short, known preamble searched
-// for at startup, the way V8Handshake's own sync gate works, rather
-// than relying on these two tracking loops to pull in a large error
-// from a cold start) is the realistic next step, not further gain
-// tuning on either loop.
+// zero real phase error to correct. With that fixed, and gains tuned
+// the same way as Gardner's, this loop stays silent (no added decode
+// errors) on every already-correct-phase test in this file.
+//
+// ACQUISITION (added after both of the above): the fine per-symbol
+// loops above are both tuned to be quiet at steady state, which, as
+// measured directly, makes them far too slow to pull in a LARGE
+// initial error (several tenths of a symbol period of timing offset,
+// or tens of degrees of phase offset) from a cold start -- the
+// classic acquisition-speed-vs-steady-state-noise tradeoff, confirmed
+// for both loops independently, and a two-stage (fast-acquire,
+// then-narrow) gain schedule was tried for both and did not help
+// either one. The fix implemented for carrier phase: a one-shot,
+// batch-averaged initial estimate (EstimateInitialCarrierPhase in the
+// .cpp) computed from the burst's own leading
+// kAcquisitionBatchSymbols, BEFORE the fine per-symbol loop runs at
+// all -- summing many symbols' 4th-power complex values first, then
+// taking the angle of the sum, lets the constant component reinforce
+// while data-dependent noise partially cancels (the same coherent-
+// averaging principle a matched filter already relies on), succeeding
+// where the slow online loop alone could not. Verified directly, not
+// assumed: on the 1-sample-shift scenario this was built to fix, the
+// batch estimate lands within about 0.2 degrees of the ideal,
+// modulo-90-degree-reduced target.
+// That verification is also what corrected the earlier, wrong
+// diagnosis above: even with carrier phase now acquired essentially
+// exactly, end-to-end decode on that same scenario barely improved.
+// Tracing why (see V34QamDemodulatorTests.cpp's
+// Demodulate_SampleAlignmentShift_IsolatesGardnerAcquisitionAsTheRemainingBottleneck_KnownLimitation
+// for the full measurement): the Gardner-recovered samples right after
+// the acquisition window have only about 1/7th the magnitude a
+// correctly-timed symbol should, meaning GARDNER's own cold-start
+// timing lock -- not carrier phase -- is the actual remaining
+// bottleneck for a sudden, large initial misalignment. Symbol timing
+// and carrier phase were never as tightly coupled as the first
+// diagnosis assumed; carrier-phase acquisition is now solved
+// independently of timing, and the still-open gap is narrower and
+// more precisely located than before: Gardner needs the equivalent
+// fast, batch-based acquisition step (e.g. a coarse search over
+// candidate sampling phases for the one that maximizes recovered
+// signal magnitude, before handing off to Gardner for fine tracking)
+// that carrier phase already has. That is the concrete next step, not
+// further gain tuning on either loop.
 class V34QamDemodulator {
 public:
     // Parameters must match the V34QamModulator that produced

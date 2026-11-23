@@ -174,6 +174,70 @@ constexpr double kFrequencyCorrectionDecayPerSymbol = 0.999;
 // cut entirely.
 constexpr double kReferencePhaseRadians = kPi / 4.0;
 
+// How many of the burst's own leading symbols get used for the
+// batch-averaged initial carrier-phase estimate below -- see
+// EstimateInitialCarrierPhase. Large enough that coherent averaging
+// genuinely suppresses the 4th-power detector's data-pattern noise
+// (see kReferencePhaseRadians's own comment, and the class comment's
+// "ACQUISITION" section), small enough to still be a small fraction of
+// a realistic TRN burst, since this is specifically meant to replace
+// the hundreds of symbols the fine per-symbol loop alone needed to
+// acquire a large initial error.
+constexpr int kAcquisitionBatchSymbols = 100;
+
+// Reference-angle-corrected 4th power of one (I, Q) sample -- the same
+// computation the fine per-symbol phase loop performs each symbol
+// (de-rotate by the known constellation reference angle, then raise to
+// the 4th power), factored out so the batch estimator below and the
+// per-symbol loop can't silently drift apart into two different
+// conventions.
+void FourthPowerWithReferenceCorrection(double i, double q, double& outRe, double& outIm) {
+    const double refCos = std::cos(kReferencePhaseRadians);
+    const double refSin = std::sin(kReferencePhaseRadians);
+    const double refI = i * refCos + q * refSin;
+    const double refQ = -i * refSin + q * refCos;
+    const double y2Re = refI * refI - refQ * refQ;
+    const double y2Im = 2.0 * refI * refQ;
+    outRe = y2Re * y2Re - y2Im * y2Im;
+    outIm = 2.0 * y2Re * y2Im;
+}
+
+// One-shot, batch-averaged initial carrier-phase estimate -- see the
+// class comment's "ACQUISITION" section for why this exists at all
+// (the fine per-symbol loop, tuned to be quiet at steady state, is too
+// slow to pull in a large initial error by itself) and why it works:
+// summing many symbols' 4th-power COMPLEX values before taking the
+// angle (coherent averaging) lets the data-independent constant
+// component reinforce while the data-dependent noise component
+// partially cancels, the same principle a matched filter already
+// relies on, rather than averaging per-symbol angle estimates directly
+// (which has no good way to handle values that wrap around +/-180
+// degrees from one symbol to the next). `unrotatedI`/`unrotatedQ` must
+// already be correctly TIMED (post-Gardner) but NOT yet carrier-phase
+// corrected -- this estimates exactly the correction the fine loop
+// would otherwise have had to discover on its own from a cold start.
+double EstimateInitialCarrierPhase(const std::vector<double>& unrotatedI, const std::vector<double>& unrotatedQ,
+                                     int marginSymbols) {
+    const auto n = static_cast<int>(unrotatedI.size());
+    const int lo = marginSymbols;
+    const int hi = std::min(n, marginSymbols + kAcquisitionBatchSymbols);
+
+    double sumRe = 0.0;
+    double sumIm = 0.0;
+    for (int k = lo; k < hi; ++k) {
+        double y4Re = 0.0;
+        double y4Im = 0.0;
+        FourthPowerWithReferenceCorrection(unrotatedI[static_cast<size_t>(k)], unrotatedQ[static_cast<size_t>(k)],
+                                           y4Re, y4Im);
+        sumRe += y4Re;
+        sumIm += y4Im;
+    }
+    if (sumRe == 0.0 && sumIm == 0.0) {
+        return 0.0;
+    }
+    return std::atan2(sumIm, sumRe) / 4.0;
+}
+
 } // namespace
 
 V34QamDemodulator::V34QamDemodulator(double symbolRateHz, double carrierFrequencyHz, double rolloffFactor,
@@ -240,15 +304,19 @@ std::vector<std::pair<double, double>> V34QamDemodulator::Demodulate(const std::
     double previousI = LanczosInterpolate(iFiltered, symbolPositionSamples - nominalSamplesPerSymbol, kLanczosA);
     double previousQ = LanczosInterpolate(qFiltered, symbolPositionSamples - nominalSamplesPerSymbol, kLanczosA);
 
-    // Carrier-phase recovery state -- see the class comment's
-    // "CARRIER-PHASE RECOVERY" section. `carrierPhaseEstimate` is this
-    // loop's running estimate of the constant-or-slowly-varying
-    // rotation error left over from Step 1's downconversion (which has
-    // no way to know the far end's true carrier phase); every symbol's
-    // (currentI, currentQ) is de-rotated by it before being returned.
-    double carrierPhaseEstimate = 0.0;
-    double carrierFrequencyCorrection = 0.0;
-
+    // Pass A: Gardner timing recovery only, over every symbol, storing
+    // each symbol's (unrotated) value -- see the class comment's
+    // "ACQUISITION" section for why this is now a separate pass rather
+    // than combined with carrier-phase correction in a single loop
+    // (short version: so the batch carrier-phase estimate right after
+    // this pass can see ALL of these symbols' raw values, not just
+    // whichever ones happen to already be processed by that point).
+    // This loop's own logic is unchanged from before that split --
+    // Gardner's timing-error detector is phase-independent by
+    // construction (see its own comment below), so it does not care
+    // whether carrier-phase correction has happened yet.
+    std::vector<double> unrotatedI(static_cast<size_t>(numSymbols));
+    std::vector<double> unrotatedQ(static_cast<size_t>(numSymbols));
     for (int k = 0; k < numSymbols; ++k) {
         const double currentI = LanczosInterpolate(iFiltered, symbolPositionSamples, kLanczosA);
         const double currentQ = LanczosInterpolate(qFiltered, symbolPositionSamples, kLanczosA);
@@ -280,6 +348,32 @@ std::vector<std::pair<double, double>> V34QamDemodulator::Demodulate(const std::
         previousQ = currentQ;
         symbolPositionSamples += nominalSamplesPerSymbol + rateCorrection + proportionalNudge;
 
+        unrotatedI[static_cast<size_t>(k)] = currentI;
+        unrotatedQ[static_cast<size_t>(k)] = currentQ;
+    }
+
+    // Acquisition: a one-shot, batch-averaged initial carrier-phase
+    // estimate from the burst's own leading symbols (see
+    // EstimateInitialCarrierPhase's comment), instead of starting the
+    // fine per-symbol loop below from a cold 0 -- which, measured
+    // directly, is far too slow to pull in a large initial error (see
+    // the class comment's "ACQUISITION" section for the actual numbers
+    // from before this existed).
+    double carrierPhaseEstimate =
+        EstimateInitialCarrierPhase(unrotatedI, unrotatedQ, /*marginSymbols=*/filterSpanSymbols_);
+    double carrierFrequencyCorrection = 0.0;
+
+    // Pass B: fine per-symbol carrier-phase tracking, starting from the
+    // batch estimate above rather than 0 -- see the class comment's
+    // "CARRIER-PHASE RECOVERY" section. `carrierPhaseEstimate` is this
+    // loop's running estimate of whatever rotation error remains after
+    // the batch estimate (residual drift, or the batch estimate's own
+    // error); every symbol's (unrotatedI, unrotatedQ) is de-rotated by
+    // it before being returned.
+    for (int k = 0; k < numSymbols; ++k) {
+        const double currentI = unrotatedI[static_cast<size_t>(k)];
+        const double currentQ = unrotatedQ[static_cast<size_t>(k)];
+
         // De-rotate this symbol by the current carrier-phase estimate
         // (multiplying the complex sample by e^{-j*carrierPhaseEstimate})
         // *before* using it for anything else -- the 4th-power detector
@@ -300,24 +394,20 @@ std::vector<std::pair<double, double>> V34QamDemodulator::Demodulate(const std::
         // -- a correctly phased sample's 4th power lands at a FIXED
         // angle (not necessarily 0; see kReferencePhaseRadians above),
         // regardless of which of the 4 rotations the actual data
-        // happened to use. First pre-rotate by -kReferencePhaseRadians
-        // so that fixed angle becomes exactly 0 rather than landing on
-        // atan2's +/-180-degree branch cut (see kReferencePhaseRadians's
-        // own comment for why that matters numerically). atan2 of the
+        // happened to use. FourthPowerWithReferenceCorrection
+        // pre-rotates by -kReferencePhaseRadians first so that fixed
+        // angle becomes exactly 0 rather than landing on atan2's
+        // +/-180-degree branch cut (see kReferencePhaseRadians's own
+        // comment for why that matters numerically). atan2 of the
         // result is then 4x the residual phase error (mod 2*pi);
         // dividing by 4 recovers it, up to the inherent, unresolvable
         // +/-90-degree-multiple ambiguity every M-th-power carrier
         // recovery technique has (see the class comment -- fixing that
         // needs a differentially-encoded or known reference symbol,
         // neither of which exists here yet).
-        const double refCos = std::cos(kReferencePhaseRadians);
-        const double refSin = std::sin(kReferencePhaseRadians);
-        const double refI = rotatedI * refCos + rotatedQ * refSin;
-        const double refQ = -rotatedI * refSin + rotatedQ * refCos;
-        const double y2Re = refI * refI - refQ * refQ;
-        const double y2Im = 2.0 * refI * refQ;
-        const double y4Re = y2Re * y2Re - y2Im * y2Im;
-        const double y4Im = 2.0 * y2Re * y2Im;
+        double y4Re = 0.0;
+        double y4Im = 0.0;
+        FourthPowerWithReferenceCorrection(rotatedI, rotatedQ, y4Re, y4Im);
         const double phaseError = std::atan2(y4Im, y4Re) / 4.0; // atan2 is already magnitude-independent
 
         carrierFrequencyCorrection =

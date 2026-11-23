@@ -1184,17 +1184,50 @@ effort, not a near-complete one:
   nothing -- but it does NOT converge fast enough to actually resolve
   that scenario within a realistic burst length. 4 tests updated/added
   (227 total, all passing, 0 build warnings).
-  **Conclusion for both loops**: symbol timing and carrier phase are no
-  longer "one doesn't exist at all" blocked on each other, but neither
-  loop, as currently tuned, can acquire a large/sudden initial
-  misalignment quickly -- both are built for already-close tracking,
-  not blind acquisition from a cold start. The realistic next step is a
-  separate, faster acquisition mechanism (e.g. a short known preamble
-  searched for at startup, the way `V8Handshake`'s own sync gate already
-  works), not further gain tuning on either loop -- that was tried
-  twice now (once for Gardner, once for carrier phase) and didn't help
-  either time, for related but distinct reasons documented in
-  `V34QamDemodulator.h`.
+  **Conclusion for both loops (at the time)**: symbol timing and
+  carrier phase are no longer "one doesn't exist at all" blocked on
+  each other, but neither loop, as currently tuned, can acquire a
+  large/sudden initial misalignment quickly -- both are built for
+  already-close tracking, not blind acquisition from a cold start. The
+  realistic next step is a separate, faster acquisition mechanism, not
+  further gain tuning on either loop.
+  **Batch acquisition built the same day, and it corrected the above
+  diagnosis along the way.** Added a one-shot, batch-averaged initial
+  carrier-phase estimate (`EstimateInitialCarrierPhase`, computed from
+  the burst's own first ~100 symbols, before the fine per-symbol loop
+  runs at all) -- summing many symbols' 4th-power complex values first,
+  then taking the angle of the sum, so the constant component
+  reinforces while data-dependent noise partially cancels, the same
+  coherent-averaging principle a matched filter already relies on.
+  Verified directly: on the 1-sample-shift scenario this was built to
+  fix, the batch estimate lands within about 0.2 degrees of the ideal,
+  modulo-90-degree-reduced target -- essentially exact.
+  **And yet end-to-end decode on that same scenario barely improved**,
+  which is what corrected the diagnosis: with carrier phase now
+  acquired almost exactly, the Gardner-recovered samples right after
+  the acquisition window still only have about 1/7th the magnitude a
+  correctly-timed symbol should. **Carrier phase was never the
+  dominant bottleneck for this scenario -- Gardner's own cold-start
+  timing lock is.** Ruled out re-attributing this to the (real, known,
+  unresolvable) 90-degree rotation ambiguity 4th-power recovery leaves
+  behind: decoding against all 4 possible rotations found the best one
+  still ~39% wrong, not near 0% the way a clean rotation-ambiguity case
+  would show. 1 test rewritten with the corrected diagnosis (227 total,
+  all passing, 0 build warnings) -- see
+  `V34QamDemodulatorTests.cpp`'s
+  `Demodulate_SampleAlignmentShift_IsolatesGardnerAcquisitionAsTheRemainingBottleneck_KnownLimitation`
+  and `V34QamDemodulator.h`'s "ACQUISITION" section for the full
+  account, including why this version of the finding is trusted more
+  than the last one: it is backed by an independent measurement of the
+  acquisition estimate's own accuracy, not just an end-to-end decode
+  number that could have several different causes.
+  **Concrete next step, now correctly scoped**: symbol timing needs the
+  same kind of fast, batch-based acquisition step carrier phase just
+  got -- e.g. a coarse search over candidate sampling phases for the
+  one that maximizes recovered signal magnitude, before handing off to
+  Gardner for fine tracking -- not further gain tuning on either loop
+  (tried multiple times now, for both loops, specifically for cold-start
+  acquisition, and it does not work).
 - **Hayes ATL/ATM (speaker volume/mode) and local audio monitoring,
   added (2026-10-19), separate from the V.34 work above.** User asked
   how to "hear the modem" the way a real modem's on-board speaker lets

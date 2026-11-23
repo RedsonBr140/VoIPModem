@@ -3,6 +3,7 @@
 #include "../src/Lib/Dsp/V34Trn.h"
 #include "TestFramework.h"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -278,41 +279,68 @@ TEST(Demodulate_ToleratesRealisticSymbolClockDrift) {
     }
 }
 
-// A real, measured architectural finding from trying to test
-// symbol-timing recovery in isolation (before carrier-phase recovery
-// existed): in this implementation, symbol timing and carrier phase
-// are NOT independent. Digital downconversion (Demodulate()'s step 1)
-// multiplies the waveform by
-// cos/sin(2*pi*carrierFrequencyHz_*n/kSampleRateHz) -- an absolute
-// phase reference tied to each sample's raw index n. Shifting the
-// waveform in time by even one sample does NOT just shift which part
-// of the pulse gets sampled -- it ALSO rotates the carrier phase by
-// 2*pi*carrierFrequencyHz_/kSampleRateHz radians (~81 degrees at V.34's
-// 1800 Hz carrier and this codebase's 8 kHz rate -- corrected from an
-// earlier, wrong "~27 degrees" estimate in this comment's own history;
-// 2*pi*1800/8000 = 1.414 rad) per sample of shift.
+// A real, measured architectural finding, refined twice now as this
+// codebase's own understanding of it improved -- kept in full because
+// each correction matters for whoever picks this up next.
 //
-// Carrier-phase recovery (the 4th-power Costas-style loop in
-// Demodulate(), see the class comment) now exists and measurably
-// chips away at exactly this error -- it does NOT just sit there
-// broken anymore, which this test confirms by comparing error counts
-// across the burst rather than asserting a single static number. But
-// it converges far too slowly to actually resolve a shift this large
-// within a realistic burst length: measured on a 1500-symbol burst,
-// split into thirds, errors drop from ~460/484 (~95%, first third) to
-// ~257/484 (~53%, last third) -- real, monotonic improvement, but
-// nowhere near usable. This is the same acquisition-speed-vs-
-// steady-state-noise tradeoff already documented for the Gardner
-// timing loop and the carrier-phase loop's own single-gain design (see
-// the class comment) -- a two-stage gain schedule was tried here too
-// and did not help (see kPhaseProportionalGain's own comment in the
-// .cpp). Symbol timing and carrier phase remain coupled in this
-// design, and neither loop, as currently tuned, can acquire a
-// multi-sample/large-phase initial error quickly -- both only really
-// work once already close to correct. Pinned here as a known,
-// measured limitation so it isn't rediscovered from scratch next
-// session.
-TEST(Demodulate_SampleAlignmentShift_CarrierPhaseLoopImprovesButDoesNotConverge_KnownLimitation) {
+// Round 1 (before any carrier-phase recovery existed): shifting the
+// waveform in time by even one sample does not just move which part
+// of the pulse gets sampled -- Demodulate()'s downconversion step
+// multiplies by cos/sin(2*pi*carrierFrequencyHz_*n/kSampleRateHz), an
+// absolute reference tied to each sample's raw index n, so the shift
+// also rotates the carrier phase by 2*pi*carrierFrequencyHz_/
+// kSampleRateHz radians (~81 degrees at V.34's 1800 Hz carrier and
+// this codebase's 8 kHz rate; 2*pi*1800/8000 = 1.414 rad -- corrected
+// from an earlier, wrong "~27 degrees" estimate in this comment's own
+// history). With zero carrier-phase recovery at the time, that alone
+// was enough to badly corrupt decisions.
+//
+// Round 2 (after the 4th-power Costas loop, before batch acquisition
+// existed): the fine per-symbol phase loop measurably reduced the
+// error over a long burst but far too slowly to be useful -- a
+// textbook acquisition-speed-vs-steady-state-noise tradeoff.
+//
+// Round 3 (after adding the batch-averaged initial carrier-phase
+// estimate, see the class comment's "ACQUISITION" section): the batch
+// estimate itself was verified independently to be accurate -- it
+// lands within about 0.2 degrees of the ideal, modulo-90-degree-
+// reduced target for this exact scenario, confirmed by comparing its
+// output directly against the hand-computed expectation. And yet this
+// test's end-to-end decode is barely better than before adding it.
+// Tracing why (not guessed): the Gardner-recovered (unrotated) samples
+// right after the acquisition window have only ~1/7th the magnitude a
+// correctly-timed symbol should -- i.e. Gardner itself, not carrier
+// phase, is sampling nowhere near the true pulse peak for this
+// scenario. Carrier-phase recovery was never the dominant bottleneck
+// here; Gardner's own cold-start timing lock for a sudden,
+// several-tenths-of-a-symbol-period misalignment is. Checked whether
+// this is actually just a leftover carrier-phase/rotation-ambiguity
+// artifact instead, by decoding against all 4 possible 90-degree
+// rotations of the alphabet (the one real ambiguity 4th-power recovery
+// can't resolve on its own, fitting one real gain across the whole
+// burst per rotation): the best rotation gets ~39% of symbols wrong,
+// not near 0% -- a real rotation-ambiguity case would show one clearly
+// correct rotation; this instead shows one BETTER rotation with
+// substantial residual error, consistent with genuine (if partial)
+// timing-driven corruption rather than a clean, fixable 90-degree
+// offset.
+//
+// Net effect: symbol timing and carrier phase are no longer "coupled"
+// in the sense this test's name used to claim (carrier-phase recovery
+// now exists and was independently verified correct for this exact
+// case). The real, still-open limitation is narrower and now correctly
+// attributed: Gardner's own timing loop, tuned for steady-state
+// quietness the same way the carrier-phase loop was, cannot acquire a
+// large sudden misalignment from a cold start. A batch-based fast
+// acquisition estimate fixed exactly this problem for carrier phase
+// (see EstimateInitialCarrierPhase); the equivalent for symbol timing
+// -- e.g. a coarse batch search over candidate sampling phases for the
+// one that maximizes recovered signal magnitude, before handing off to
+// Gardner for fine tracking -- does not exist yet and is the next
+// concrete step, not further gain tuning on either loop (tried
+// multiple times now, for both loops, and it does not work for
+// cold-start acquisition).
+TEST(Demodulate_SampleAlignmentShift_IsolatesGardnerAcquisitionAsTheRemainingBottleneck_KnownLimitation) {
     V34TrnGenerator trn(V34ScramblerMode::AnswerMode, /*use16Point=*/false);
     std::vector<std::pair<int, int>> symbols;
     for (int i = 0; i < 1500; ++i) {
@@ -333,23 +361,46 @@ TEST(Demodulate_SampleAlignmentShift_CarrierPhaseLoopImprovesButDoesNotConverge_
     const auto recovered = demodulator.Demodulate(waveform, static_cast<int>(symbols.size()));
 
     const auto alphabet = DistinctPoints(symbols);
-    int errorsByThird[3] = {0, 0, 0};
-    for (int third = 0; third < 3; ++third) {
-        const size_t lo = static_cast<size_t>(third) * symbols.size() / 3 + static_cast<size_t>(span);
-        const size_t hi = static_cast<size_t>(third + 1) * symbols.size() / 3 - static_cast<size_t>(span);
-        std::vector<std::pair<double, double>> sub(recovered.begin() + lo, recovered.begin() + hi);
-        std::vector<std::pair<int, int>> subSymbols(symbols.begin() + lo, symbols.begin() + hi);
-        const double gain = EstimateGain(sub, subSymbols);
-        errorsByThird[third] = CountNearestNeighborDecodeErrors(sub, subSymbols, alphabet, gain, /*margin=*/0);
+
+    // Try all 4 possible 90-degree rotations (the one real ambiguity
+    // 4th-power recovery can leave behind) and take the best -- this
+    // test is about Gardner's timing lock, not re-litigating that
+    // already-documented, inherent ambiguity.
+    int bestErrors = static_cast<int>(symbols.size());
+    for (int rot = 0; rot < 4; ++rot) {
+        auto rotate = [rot](std::pair<int, int> p) {
+            int x = p.first, y = p.second;
+            for (int r = 0; r < rot; ++r) {
+                const int nx = -y, ny = x;
+                x = nx;
+                y = ny;
+            }
+            return std::pair<int, int>(x, y);
+        };
+        std::vector<std::pair<int, int>> rotatedAlphabet;
+        for (auto& p : alphabet) {
+            rotatedAlphabet.push_back(rotate(p));
+        }
+        std::vector<std::pair<int, int>> rotatedSymbols;
+        for (auto& s : symbols) {
+            rotatedSymbols.push_back(rotate(s));
+        }
+        const double gain = EstimateGain(recovered, rotatedSymbols);
+        const int errors = CountNearestNeighborDecodeErrors(recovered, rotatedSymbols, rotatedAlphabet, gain,
+                                                              /*margin=*/span);
+        bestErrors = std::min(bestErrors, errors);
     }
 
-    // Still mostly broken early (acquisition hasn't gotten anywhere
-    // close yet)...
-    EXPECT_TRUE(errorsByThird[0] > 400);
-    // ...but genuinely, substantially better by the end, not stuck...
-    EXPECT_TRUE(errorsByThird[2] < errorsByThird[0] - 100);
-    // ...while still nowhere near actually usable.
-    EXPECT_TRUE(errorsByThird[2] > 150);
+    const int total = static_cast<int>(symbols.size()) - 2 * span;
+    // Measured: ~573/1484 (~39%) wrong under the best of the 4
+    // rotations, with one gain fit across the whole burst. A genuine
+    // minority-wrong result, not the "mostly broken" figure the
+    // per-segment analysis above saw -- but still far from usable for
+    // real decoding, and still clearly explained by Gardner's own
+    // acquisition gap (see this test's own comment), not by carrier
+    // phase or an unresolved rotation ambiguity.
+    EXPECT_TRUE(bestErrors > total / 4);
+    EXPECT_TRUE(bestErrors < total * 2 / 3);
 }
 
 TEST(Demodulate_ZeroSymbolsProducesEmptyOutput) {
