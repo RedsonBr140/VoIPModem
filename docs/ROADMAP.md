@@ -1313,6 +1313,42 @@ effort, not a near-complete one:
   software — nothing in this phase has been claimed as "working" per
   CLAUDE.md's rule against claiming standard support without
   implementation and interop tests.
+- **Scope decision (2026-11-23): reach a real "two modems connect and
+  talk" milestone via V.21 first, not by continuing to chase V.34's
+  cold-start acquisition problem.** Per the user's explicit "we'll
+  never finish if we try to perfect every routine" direction, the
+  target for the next concrete milestone is wiring `V8Handshake`'s
+  already-negotiated V.21 mode into a real FSK data-mode byte
+  passthrough (serial port -> `FskModulator`/RTP -> far end's
+  `FskDemodulator` -> serial port), using primitives
+  (`FskModulator`/`FskDemodulator`) already proven stable on a real
+  call earlier in Phase 4 -- not full V.34 data mode, which still needs
+  the acquisition rework below first.
+- **Architectural reference found for V.34's still-open acquisition
+  gap, independent of the above: BinModem (github.com/CasualArclamp/
+  BinModem, GPL-3.0, Rust) — read for architecture only, same as
+  D-Modem/slmodemd earlier in this phase, never as a code source.** Its
+  own design docs independently confirm VoIPModem's diagnosis (a
+  symbol-spaced equalizer/Gardner combination cannot invert a channel
+  null that lands at the worst sampling phase — documented in its own
+  `docs/design/slow-modes/shared-dsp.md` as a known weakness of exactly
+  that architecture) and show the actual fix it shipped: no blind
+  acquisition stage at all. It uses the *known* TRN/PP training
+  sequence (which VoIPModem already generates via `V34Scrambler`/
+  `V34TrnGenerator`) to directly least-squares-solve a T/2 (half-symbol-
+  spaced) equalizer across a small window of candidate alignments,
+  reads carrier turn off that same solve's residual phase, and only
+  then hands off to small tracking loops for residual drift — which
+  work well specifically because they start already close, not because
+  they can acquire from a cold start (the same lesson VoIPModem's own
+  Gardner/Costas tuning attempts already learned the hard way). See
+  [[reference_binmodem]] (project memory) for the full architectural
+  account with file:line citations into BinModem's own source, kept
+  there rather than duplicated here since it's reference material, not
+  VoIPModem's own implementation history. **This is the recommended
+  next V.34 architecture once the V.21 milestone above ships** — not
+  more gain tuning on the existing Gardner/Costas loops, which has
+  already failed twice for related reasons.
 
 ## Phase 5 — Windows networking (RAS/PPP) — **not started**
 
