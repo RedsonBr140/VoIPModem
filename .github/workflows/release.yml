@@ -1,0 +1,60 @@
+name: Release
+
+# Push a tag like v0.1.0 to build Release and publish it as a GitHub
+# release with a zip attached.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the release and upload its asset
+
+env:
+  TOOLSET: v143     # see ci.yml
+
+jobs:
+  release:
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/build
+        with:
+          configuration: Release
+          toolset: ${{ env.TOOLSET }}
+
+      - name: Run tests
+        shell: pwsh
+        run: ./x64/Release/VoIPModem.Tests.exe
+
+      # The binary links libv90modem (GPL-2.0-only) and PJSIP (GPL-2.0 or
+      # later), so their licence texts ship with it.
+      - name: Package
+        id: package
+        shell: pwsh
+        run: |
+          $name = "VoIPModem-${{ github.ref_name }}-win-x64"
+          $dir = "dist/$name"
+          New-Item -ItemType Directory -Force "$dir/licenses" | Out-Null
+          Copy-Item x64/Release/VoIPModem.exe $dir
+          Copy-Item config/voipmodem.ini.sample $dir
+          Copy-Item README.md $dir
+          Copy-Item third_party/libv90modem/LICENSE "$dir/licenses/libv90modem-LICENSE.txt"
+          Copy-Item third_party/pjproject/COPYING "$dir/licenses/pjproject-COPYING.txt"
+          Compress-Archive -Path "$dir/*" -DestinationPath "dist/$name.zip"
+          "zip=dist/$name.zip" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}"
+          "${{ steps.package.outputs.zip }}"
+          --title "VoIPModem ${{ github.ref_name }}"
+          --generate-notes
+          --verify-tag

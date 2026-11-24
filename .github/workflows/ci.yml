@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR supersedes a run still going.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # windows-2022 ships Visual Studio 2022, whose toolset is v143. Pinned
+  # (not windows-latest) because the toolset below must match the image.
+  TOOLSET: v143
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.configuration }}
+    runs-on: windows-2022
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/build
+        with:
+          configuration: ${{ matrix.configuration }}
+          toolset: ${{ env.TOOLSET }}
+
+      # Exits non-zero if any test fails. No COM ports, SIP server or network
+      # needed: the suite covers the Hayes parser, the state machine, config
+      # loading and two libv90modem instances connected back to back.
+      - name: Run tests
+        shell: pwsh
+        run: ./x64/${{ matrix.configuration }}/VoIPModem.Tests.exe
+
+      - name: Upload binaries
+        if: matrix.configuration == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoIPModem-x64-Release-${{ github.sha }}
+          path: |
+            x64/Release/VoIPModem.exe
+            config/voipmodem.ini.sample
+          if-no-files-found: error
+          retention-days: 14

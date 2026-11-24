@@ -1,5 +1,7 @@
 # VoIPModem
 
+[![CI](https://github.com/RedsonBr140/VoIPModem/actions/workflows/ci.yml/badge.svg)](https://github.com/RedsonBr140/VoIPModem/actions/workflows/ci.yml)
+
 A modem bank in software for Windows. Each line is a Hayes-compatible
 modem on a (virtual) COM port on one side and a SIP extension on the
 other. When a call comes in or goes out, the call's G.711 audio runs
@@ -85,3 +87,15 @@ dependency. It covers the Hayes parser, the state machine (with a fake
 call controller), config loading, and the MSVC build of libv90modem (two
 modems connected back to back). Calls through real SIP, and links with
 real modems, are tested by hand; `docs/ROADMAP.md` records what has been.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` builds Debug and Release on GitHub's
+`windows-2022` runner and runs the tests on every push and pull request;
+the Release binary is kept as an artifact. The runner has Visual Studio
+2022, so CI overrides the projects' `v145` toolset with `v143`. pjproject's
+build is cached by submodule commit, toolset, configuration and
+`config_site.h`. Pushing a `v*` tag runs `release.yml`, which publishes a
+GitHub release with a zip of the binary, the sample config and the
+licence texts of libv90modem and PJSIP. Dependabot proposes weekly
+updates to the actions and both submodules.
