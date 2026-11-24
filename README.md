@@ -62,19 +62,22 @@ msbuild VoIPModem.sln /p:Configuration=Release /p:Platform=Win32
 Shared build settings (output folders, PJSIP paths and library names) live
 in `build/VoIPModem.props`, which every project imports.
 
-**Windows XP / Server 2003** (work in progress, not yet run on XP): the
-`Debug-XP` and `Release-XP` configurations (Win32 for XP, x64 for XP x64
-and 2003 x64) use the `v141_xp` toolset, which needs Visual Studio's
-"C++ Windows XP Support for VS 2017 (v141) tools" component. They link a
-separate PJSIP checkout, `third_party/pjproject-xp`, built with:
+**Windows XP / Server 2003**: the `Debug-XP` and `Release-XP`
+configurations (Win32 for XP, x64 for XP x64 and Server 2003 x64) use the
+`v141_xp` toolset. Current Visual Studio no longer offers it; install
+Visual Studio 2019 or 2022 Build Tools with "C++ Windows XP Support for
+VS 2017 (v141) tools", alongside your main Visual Studio. Then:
 
-```
-msbuild third_party\pjproject-xp\pjproject-vs14.sln /t:libpjproject /p:Configuration=Release-Static /p:Platform=Win32 /p:PlatformToolset=v141_xp
-msbuild VoIPModem.sln /p:Configuration=Release-XP /p:Platform=Win32
+```powershell
+.\scripts\build-xp.ps1 -Platform Win32 -Configuration Release-XP
 ```
 
-Output goes to `Win32\Release-XP\`. Toolset selection per configuration is
-in `build/VoIPModem.Toolset.props`.
+The script finds the installation that has `v141_xp`, builds the separate
+PJSIP checkout `third_party/pjproject-xp`, then the solution, into
+`Win32\Release-XP\`. (`-SkipPjproject` skips PJSIP on later runs.) The
+result needs Windows XP SP3 (or Server 2003) and no runtime
+redistributable: the C runtime is linked statically. Toolset choice per
+configuration is in `build/VoIPModem.Toolset.props`.
 
 ## Run
 

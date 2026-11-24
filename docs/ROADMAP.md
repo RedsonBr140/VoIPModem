@@ -11,7 +11,7 @@ just coded. `ARCHITECTURE.md` describes how each part works.
 | 3. RTP audio | **Complete**, verified live; media path retuned for modems in Phase 4 |
 | 4. Modem interoperability | **In progress**: real data links at up to V.90 with a SIP softmodem; physical analog modem not yet tested |
 | 5. Windows networking (RAS/PPP) | Not started |
-| 6. Compatibility and optimization | **Started**: x64 + Win32 builds; XP/2003 build next |
+| 6. Compatibility and optimization | **Started**: x64 + Win32 builds; XP Win32 build done, not yet run on XP |
 
 ## Phase 1 — Serial modem skeleton — complete
 
@@ -160,17 +160,25 @@ versions) per Windows generation where needed.
   pass all tests (including libv90modem back to back) locally (v145)
   and in CI (v143). Their PE headers require Windows 6.0 (Vista), so
   XP (5.1) and Server 2003 (5.2) refuse to load them.
-- **Next: legacy build for XP/2003, x86 and x64**, with the `v141_xp`
-  toolset (Windows 7.1A SDK), whose output requires 5.01 (x86) / 5.02
-  (x64). Not installed on the development machine yet. Plan:
-  1. a separate pjproject checkout for it (its library names don't
-     include the toolset, so one tree can't hold both builds); PJSIP 2.17
-     still defaults to `_WIN32_WINNT` 0x0501 and guards its Vista-only
-     calls, but has not been run on XP; an older release is the fallback;
-  2. libv90modem compiled in MSVC's default C mode (v141 has no C11
-     switch);
-  3. a run on a real XP VM with com0com: start, register, answer, connect,
-     pass data. Only then into CI, if the runner image has `v141_xp`.
+- **Done: XP build, Win32** (`Release-XP`, `scripts/build-xp.ps1`), with
+  `v141_xp` from Visual Studio 2022 Build Tools (Windows 7.1A SDK):
+  - PJSIP 2.17, unmodified, in its own checkout `third_party/pjproject-xp`
+    (pjproject's library names ignore the toolset, so one tree can't hold
+    both builds). One fix in our `config_site.h`: the 7.1A SDK has no
+    `_WIN32_WINNT_WIN8`, which made pjlib's `#if PJ_WIN32_WINNT >=
+    _WIN32_WINNT_WIN8` compare against 0 and pick Windows 8 code.
+  - libv90modem in MSVC's default C mode (v141 has no C11 switch): compiles
+    unchanged.
+  - Strict conformance mode (`/permissive-`) is off for XP builds; the 7.1A
+    SDK's `objbase.h` does not compile under it.
+  - Verified on the development machine: no warnings, 85/85 tests pass
+    (libv90modem back to back included); the PE header says Windows 5.01;
+    imports only KERNEL32, WS2_32, ole32 and WINMM, whose one post-XP-RTM
+    function (`GetLogicalProcessorInformation`, from the C runtime) exists
+    from XP SP3. So: **needs XP SP3**, no redistributable.
+- **Next**: run it on the XP VM (tests, then registration, a call,
+  connect, data), then the x64 XP build (XP x64 / Server 2003 x64), then
+  CI, if GitHub's runner image has `v141_xp`.
 
 ## Recommended next step
 

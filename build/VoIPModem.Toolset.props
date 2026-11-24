@@ -23,5 +23,7 @@
 
     <PlatformToolset Condition="'$(VoIPModemXP)'!='true'">v145</PlatformToolset>
     <PlatformToolset Condition="'$(VoIPModemXP)'=='true'">v141_xp</PlatformToolset>
+    <!-- MSB8051 "targeting Windows XP is deprecated": known and deliberate. -->
+    <XPDeprecationWarning Condition="'$(VoIPModemXP)'=='true'">false</XPDeprecationWarning>
   </PropertyGroup>
 </Project>

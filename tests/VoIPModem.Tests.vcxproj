@@ -63,7 +63,8 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <ConformanceMode>true</ConformanceMode>
+      <!-- /permissive- breaks the Windows 7.1A SDK headers (objbase.h) the XP toolset uses -->
+      <ConformanceMode Condition="'$(VoIPModemXP)'!='true'">true</ConformanceMode>
       <AdditionalIncludeDirectories>..\third_party\libv90modem\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
