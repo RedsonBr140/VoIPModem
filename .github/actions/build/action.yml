@@ -1,0 +1,67 @@
+name: Build VoIPModem
+description: >
+  Builds pjproject (cached), then VoIPModem.sln, for one configuration on a
+  Windows runner. The caller must have checked out the repository with
+  submodules.
+
+inputs:
+  platform:
+    description: x64 or Win32
+    required: true
+  configuration:
+    description: Debug or Release
+    required: true
+  toolset:
+    description: >
+      MSVC PlatformToolset to build with. The .vcxproj files say v145 (the
+      development machine's Visual Studio); CI overrides it to whatever the
+      runner image has. Must match the runner image.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    # pjproject needs config_site.h in place both to build it and to compile
+    # anything that includes its headers, so this runs on a cache hit too.
+    - name: Place pjproject config_site.h
+      shell: pwsh
+      run: ./scripts/setup-pjproject.ps1
+
+    - name: Compute pjproject cache key
+      id: pjkey
+      shell: pwsh
+      run: |
+        $sha = git rev-parse HEAD:third_party/pjproject
+        $cfg = (Get-FileHash third_party/pjsip-config/config_site.h -Algorithm SHA256).Hash.Substring(0, 16)
+        "key=pjproject-$sha-${{ inputs.toolset }}-${{ inputs.platform }}-${{ inputs.configuration }}-$cfg" >> $env:GITHUB_OUTPUT
+
+    - name: Restore pjproject build
+      id: pjcache
+      uses: actions/cache@v4
+      with:
+        path: third_party/pjproject/lib
+        key: ${{ steps.pjkey.outputs.key }}
+
+    - name: Build pjproject (libpjproject, ${{ inputs.platform }} ${{ inputs.configuration }}-Static)
+      if: steps.pjcache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: >
+        msbuild third_party/pjproject/pjproject-vs14.sln
+        /t:libpjproject
+        /p:Configuration=${{ inputs.configuration }}-Static
+        /p:Platform=${{ inputs.platform }}
+        /p:PlatformToolset=${{ inputs.toolset }}
+        /m /v:minimal /nologo
+
+    # Builds libv90modem, VoIPModemLib, VoIPModem, VoIPModemManager and VoIPModem.Tests.
+    - name: Build VoIPModem.sln (${{ inputs.platform }} ${{ inputs.configuration }})
+      shell: pwsh
+      run: >
+        msbuild VoIPModem.sln
+        /p:Configuration=${{ inputs.configuration }}
+        /p:Platform=${{ inputs.platform }}
+        /p:PlatformToolset=${{ inputs.toolset }}
+        /m /v:minimal /nologo

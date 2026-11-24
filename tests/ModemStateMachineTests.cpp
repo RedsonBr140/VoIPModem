@@ -149,6 +149,21 @@ TEST(HandleCallEvent_Connected_ReportsConnect) {
 
     const auto outcome = core.HandleCallEvent(CallEvent{CallEventType::Connected});
     EXPECT_TRUE(outcome.finalResult == ResultCode::Connect);
+    EXPECT_EQ(outcome.resultSuffix, std::string()); // rate unknown: plain CONNECT
+}
+
+TEST(HandleCallEvent_ConnectedWithRate_ReportsConnectRate) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    CallEvent event{CallEventType::Connected};
+    event.connectRateBps = 31200;
+    const auto outcome = core.HandleCallEvent(event);
+    EXPECT_TRUE(outcome.finalResult == ResultCode::Connect);
+    EXPECT_EQ(outcome.resultSuffix, std::string(" 31200"));
+    EXPECT_TRUE(core.CurrentState() == ModemState::OnlineData);
 }
 
 TEST(HandleCallEvent_IncomingCall_SetsHasIncomingCallAndNoResult) {

@@ -30,6 +30,31 @@ ResultCode MapSipStatusToResultCode(pjsip_status_code code) {
     }
 }
 
+// "\"Name\" <sip:5551204@10.0.0.1;user=phone>" -> "5551204"; the display
+// name when the URI has no user part.
+std::string RemoteUser(const std::string& uri) {
+    const auto sip = uri.find("sip:");
+    if (sip != std::string::npos) {
+        const auto start = sip + 4;
+        const auto at = uri.find('@', start);
+        const auto stop = uri.find_first_of(">;", start);
+        if (at != std::string::npos && (stop == std::string::npos || at < stop)) {
+            return uri.substr(start, at - start);
+        }
+    }
+    const auto q1 = uri.find('"');
+    const auto q2 = q1 == std::string::npos ? std::string::npos : uri.find('"', q1 + 1);
+    if (q2 != std::string::npos && q2 > q1 + 1) {
+        return uri.substr(q1 + 1, q2 - q1 - 1);
+    }
+    return uri;
+}
+
+// "sip:host:port" plus ";transport=tcp" when the line uses TCP.
+std::string SipUri(const std::string& userAtHost, const std::string& transport) {
+    return "sip:" + userAtHost + (transport == "TCP" ? ";transport=tcp" : "");
+}
+
 } // namespace
 
 class SipAccount;
@@ -68,8 +93,21 @@ public:
     std::unique_ptr<SipAccount> account_;
     std::unique_ptr<SipCall> activeCall_;
     std::unique_ptr<SipCall> pendingIncomingCall_;
-    bool enableV34Probing_ = false;
     bool enableLocalAudio_ = false;
+    ModemOptions modemOptions_;
+
+    // Status for GetStatus(), written from PJSIP's thread; under mutex_.
+    CallStatus::Registration registration_ = CallStatus::Registration::None;
+    int registrationCode_ = 0;
+    std::string registrationReason_;
+    std::string remoteParty_;
+    std::string codec_;
+    int audioMediaIndex_ = -1;
+    unsigned long rejectedBusy_ = 0;
+    // ModemInstance thread only: we already reported NO CARRIER for a
+    // modem that ended and hung up ourselves, so the SIP disconnect that
+    // follows must not report it a second time.
+    bool swallowNextSipEnded_ = false;
 };
 
 class SipCall : public pj::Call {
@@ -87,9 +125,17 @@ public:
             return; // call already torn down underneath us; nothing to report
         }
 
-        if (info.state == PJSIP_INV_STATE_CONFIRMED) {
-            impl_.PushEvent(CallEvent{CallEventType::Connected});
-        } else if (info.state == PJSIP_INV_STATE_DISCONNECTED) {
+        {
+            std::lock_guard<std::mutex> lock(impl_.mutex_);
+            if (impl_.activeCall_.get() == this || impl_.pendingIncomingCall_.get() == this) {
+                impl_.remoteParty_ = RemoteUser(info.remoteUri); // not a call we refused as busy
+            }
+        }
+
+        // SIP CONFIRMED is only the phone call being up, not the modem
+        // link: CONNECT is reported once the modem reaches data mode (see
+        // PjsipCallController::PollEvent), as a real modem would.
+        if (info.state == PJSIP_INV_STATE_DISCONNECTED) {
             impl_.PushEvent(CallEvent{CallEventType::Ended, MapSipStatusToResultCode(info.lastStatusCode)});
             impl_.RetireCall(this);
         }
@@ -123,9 +169,20 @@ public:
             }
 
             if (!audioBridge_) {
+                bool alaw = false; // the modem must know the codec's law (V.90/V.92 PCM especially)
+                try {
+                    const pj::StreamInfo si = getStreamInfo(i);
+                    alaw = si.codecName.rfind("PCMA", 0) == 0;
+                    impl_.logger_.Info("Call audio codec: " + si.codecName);
+                    std::lock_guard<std::mutex> lock(impl_.mutex_);
+                    impl_.codec_ = si.codecName;
+                    impl_.audioMediaIndex_ = static_cast<int>(i);
+                } catch (const pj::Error&) {
+                }
                 try {
                     audioBridge_ = std::make_unique<CallAudioBridge>(callingParty_, impl_.logger_,
-                                                                      impl_.enableV34Probing_, impl_.enableLocalAudio_);
+                                                                      impl_.enableLocalAudio_, alaw,
+                                                                      impl_.modemOptions_);
                     audioBridge_->Start(*audioMedia);
                 } catch (const pj::Error& err) {
                     impl_.logger_.Error("Failed to start tone-probe audio bridge: " + err.info());
@@ -149,6 +206,11 @@ public:
 
     std::vector<std::uint8_t> DrainRxBytes() { return audioBridge_ ? audioBridge_->DrainRxBytes() : std::vector<std::uint8_t>{}; }
 
+    bool TakeModemConnected(int& rxBps) { return audioBridge_ && audioBridge_->TakeModemConnected(rxBps); }
+    bool TakeModemEnded() { return audioBridge_ && audioBridge_->TakeModemEnded(); }
+    bool HasMedia() const { return audioBridge_ != nullptr; }
+    ModemLinkStatus LinkStatus() const { return audioBridge_ ? audioBridge_->GetLinkStatus() : ModemLinkStatus{}; }
+
 private:
     PjsipCallController::Impl& impl_;
     bool callingParty_;
@@ -161,8 +223,21 @@ public:
 
     void onRegState(pj::OnRegStateParam& prm) override {
         pj::AccountInfo info = getInfo();
-        impl_.logger_.Info(std::string("SIP ") + (info.regIsActive ? "registration" : "unregistration") +
-                            " result: " + std::to_string(prm.code) + " " + prm.reason);
+        if (prm.code / 100 == 2) {
+            impl_.logger_.Info(std::string("SIP ") + (info.regIsActive ? "registration" : "unregistration") +
+                               " result: " + std::to_string(prm.code) + " " + prm.reason);
+        } else {
+            impl_.logger_.Warn("SIP registration failed: " + std::to_string(prm.code) + " " + prm.reason);
+        }
+        std::lock_guard<std::mutex> lock(impl_.mutex_);
+        impl_.registrationCode_ = prm.code;
+        impl_.registrationReason_ = prm.reason;
+        if (prm.code / 100 == 2) {
+            impl_.registration_ = info.regIsActive ? CallStatus::Registration::Registered
+                                                   : CallStatus::Registration::Unregistered;
+        } else {
+            impl_.registration_ = CallStatus::Registration::Failed;
+        }
     }
 
     void onIncomingCall(pj::OnIncomingCallParam& iprm) override {
@@ -178,9 +253,22 @@ public:
             } catch (const pj::Error& err) {
                 impl_.logger_.Warn("Failed to reject second incoming call: " + err.info());
             }
+            std::lock_guard<std::mutex> lock(impl_.mutex_);
+            ++impl_.rejectedBusy_;
             return; // `call` destructs here; it was never accepted
         }
 
+        std::string remote;
+        try {
+            remote = RemoteUser(call->getInfo().remoteUri);
+        } catch (const pj::Error&) {
+        }
+        {
+            std::lock_guard<std::mutex> lock(impl_.mutex_);
+            impl_.remoteParty_ = remote;
+            impl_.codec_.clear();
+            impl_.audioMediaIndex_ = -1;
+        }
         impl_.pendingIncomingCall_ = std::move(call);
         impl_.PushEvent(CallEvent{CallEventType::IncomingCall});
     }
@@ -220,16 +308,20 @@ void PjsipCallController::Impl::RetireCall(SipCall* which) {
 
 PjsipCallController::PjsipCallController(PjsipEndpoint& endpoint, SipAccountConfig config, TaggedLogger& logger)
     : endpoint_(endpoint), config_(std::move(config)), logger_(logger), impl_(std::make_unique<Impl>(logger)) {
-    impl_->enableV34Probing_ = config_.enableV34Probing;
     impl_->enableLocalAudio_ = config_.enableLocalAudio;
+    impl_->modemOptions_.modulations = config_.modulations;
+    impl_->modemOptions_.errorControl = config_.errorControl;
+    impl_->modemOptions_.compression = config_.compression;
 }
 
 PjsipCallController::~PjsipCallController() {
     if (impl_->account_) {
         try {
-            impl_->account_->setRegistration(false);
+            if (impl_->account_->getInfo().regIsActive) {
+                impl_->account_->setRegistration(false);
+            }
         } catch (const pj::Error& err) {
-            logger_.Warn("Unregistration failed during shutdown: " + err.info());
+            logger_.Warn("Unregistration failed during shutdown: " + err.reason);
         }
     }
 }
@@ -243,13 +335,22 @@ bool PjsipCallController::Start() {
 
         pj::AccountConfig accountConfig;
         accountConfig.idUri = "sip:" + config_.extension + "@" + config_.server;
-        accountConfig.regConfig.registrarUri = "sip:" + config_.server;
+        accountConfig.regConfig.registrarUri = SipUri(config_.server, config_.transport);
+        accountConfig.regConfig.timeoutSec = static_cast<unsigned>(config_.registerExpirySeconds);
+        accountConfig.regConfig.registerOnAdd = config_.registerOnStart;
+        accountConfig.mediaConfig.transportConfig.port = static_cast<unsigned>(config_.rtpPort);
+        accountConfig.mediaConfig.transportConfig.portRange = static_cast<unsigned>(config_.rtpPortRange);
 
         pj::AuthCredInfo cred("digest", config_.realm, config_.extension, 0, config_.password);
         accountConfig.sipConfig.authCreds.push_back(cred);
 
         account->create(accountConfig);
         impl_->account_ = std::move(account);
+        {
+            std::lock_guard<std::mutex> lock(impl_->mutex_);
+            impl_->registration_ = config_.registerOnStart ? CallStatus::Registration::Registering
+                                                           : CallStatus::Registration::Unregistered;
+        }
         logger_.Info("SIP account created for extension '" + config_.extension + "' against " + config_.server);
         return true;
     } catch (const pj::Error& err) {
@@ -272,7 +373,13 @@ void PjsipCallController::Dial(const std::string& number) {
     try {
         auto call = std::make_unique<SipCall>(*impl_->account_, *impl_, /*callingParty=*/true);
         pj::CallOpParam callParam(true);
-        call->makeCall("sip:" + number + "@" + config_.server, callParam);
+        {
+            std::lock_guard<std::mutex> lock(impl_->mutex_);
+            impl_->remoteParty_ = number;
+            impl_->codec_.clear();
+            impl_->audioMediaIndex_ = -1;
+        }
+        call->makeCall(SipUri(number + "@" + config_.server, config_.transport), callParam);
         impl_->activeCall_ = std::move(call);
     } catch (const pj::Error& err) {
         logger_.Error("Dial to '" + number + "' failed: " + err.info());
@@ -314,7 +421,41 @@ void PjsipCallController::HangUp() {
 }
 
 CallEvent PjsipCallController::PollEvent() {
-    return impl_->PopEvent();
+    // Modem-level events first. activeCall_ can be retired by PJSIP's
+    // thread (RetireCall, under mutex_), so look under the lock -- but
+    // hang up outside it: hangup() may call back into RetireCall.
+    int rxBps = 0;
+    bool connected = false;
+    bool ended = false;
+    {
+        std::lock_guard<std::mutex> lock(impl_->mutex_);
+        if (impl_->activeCall_) {
+            connected = impl_->activeCall_->TakeModemConnected(rxBps);
+            if (!connected) {
+                ended = impl_->activeCall_->TakeModemEnded();
+            }
+        }
+    }
+    if (connected) {
+        CallEvent event{CallEventType::Connected};
+        event.connectRateBps = rxBps;
+        return event;
+    }
+    if (ended) {
+        logger_.Info("Modem link ended; hanging up the SIP call");
+        impl_->swallowNextSipEnded_ = true;
+        HangUp();
+        return CallEvent{CallEventType::Ended, ResultCode::NoCarrier};
+    }
+
+    for (;;) {
+        const CallEvent event = impl_->PopEvent();
+        if (event.type == CallEventType::Ended && impl_->swallowNextSipEnded_) {
+            impl_->swallowNextSipEnded_ = false;
+            continue; // already reported when the modem ended
+        }
+        return event;
+    }
 }
 
 void PjsipCallController::SendData(const std::vector<std::uint8_t>& bytes) {
@@ -335,6 +476,73 @@ std::vector<std::uint8_t> PjsipCallController::PollReceivedData() {
         return {};
     }
     return impl_->activeCall_->DrainRxBytes();
+}
+
+CallStatus PjsipCallController::GetStatus() {
+    CallStatus status;
+    SipCall* call = nullptr;
+    int mediaIndex = -1;
+    {
+        std::lock_guard<std::mutex> lock(impl_->mutex_);
+        status.registration = impl_->registration_;
+        status.registrationCode = impl_->registrationCode_;
+        status.registrationReason = impl_->registrationReason_;
+        status.rejectedBusy = impl_->rejectedBusy_;
+        status.alerting = impl_->pendingIncomingCall_ != nullptr;
+        call = impl_->activeCall_.get();
+        status.inCall = call != nullptr || status.alerting;
+        if (status.inCall) {
+            status.remoteParty = impl_->remoteParty_;
+            status.codec = impl_->codec_;
+        }
+        if (call != nullptr) {
+            status.mediaActive = call->HasMedia();
+            status.modem = call->LinkStatus();
+            mediaIndex = impl_->audioMediaIndex_;
+        }
+    }
+
+    // Outside mutex_: pjsua takes its own locks here, and PJSIP's thread
+    // takes mutex_ while holding them (onCallState). `call` stays alive:
+    // a retired call is only destroyed by PopEvent(), on this thread.
+    if (call != nullptr && mediaIndex >= 0) {
+        try {
+            const pj::StreamStat stat = call->getStreamStat(static_cast<unsigned>(mediaIndex));
+            const pj::RtcpStreamStat& rx = stat.rtcp.rxStat;
+            status.jitterMeanMs = rx.jitterUsec.mean / 1000.0;
+            status.jitterMaxMs = rx.jitterUsec.max / 1000.0;
+            status.rtpPacketsReceived = rx.pkt;
+            status.rtpPacketsLost = rx.loss;
+            status.rtpBytesReceived = rx.bytes;
+            status.rtpBytesSent = stat.rtcp.txStat.bytes;
+        } catch (const pj::Error&) {
+        }
+    }
+    return status;
+}
+
+bool PjsipCallController::SetRegistered(bool registered) {
+    if (!impl_->account_) {
+        return true; // no account: nothing is registered either way
+    }
+    try {
+        impl_->account_->setRegistration(registered);
+        std::lock_guard<std::mutex> lock(impl_->mutex_);
+        impl_->registration_ = registered ? CallStatus::Registration::Registering
+                                          : CallStatus::Registration::Unregistered;
+        return true;
+    } catch (const pj::Error& err) {
+        if (!registered && err.status == PJ_EINVALIDOP) {
+            // Nothing registered (the last REGISTER failed): already done.
+            std::lock_guard<std::mutex> lock(impl_->mutex_);
+            impl_->registration_ = CallStatus::Registration::Unregistered;
+            return true;
+        }
+        // PJSIP_EBUSY while a REGISTER (or its retry) is in flight.
+        logger_.Debug(std::string(registered ? "Registration" : "Unregistration") +
+                      " request deferred (" + err.reason + "); retrying");
+        return false;
+    }
 }
 
 } // namespace voipmodem

@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # The actions used by the workflows and the composite build action.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/build
+    schedule:
+      interval: weekly
+
+  # pjproject and libv90modem. libv90modem's API is not stable before 1.0,
+  # so these come as PRs for review and live testing, never merged on CI
+  # alone.
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly

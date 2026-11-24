@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Imported by every VoIPModem project right after Microsoft.Cpp.Default.props,
+  before the project's Configuration property group: the toolset must be
+  chosen before Microsoft.Cpp.props is imported.
+
+  Configurations:
+    Debug,    Release      modern build: Windows Vista and later (toolset v145)
+    Debug-XP, Release-XP   Windows XP / Server 2003 build (toolset v141_xp)
+
+  Projects condition on the two flags below rather than on configuration
+  names, so Debug and Debug-XP share their debug settings.
+
+  A PlatformToolset passed on the command line (CI does: /p:PlatformToolset=)
+  overrides the choice here.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <VoIPModemXP>false</VoIPModemXP>
+    <VoIPModemXP Condition="$(Configuration.EndsWith('-XP'))">true</VoIPModemXP>
+    <VoIPModemDebug>false</VoIPModemDebug>
+    <VoIPModemDebug Condition="$(Configuration.StartsWith('Debug'))">true</VoIPModemDebug>
+
+    <PlatformToolset Condition="'$(VoIPModemXP)'!='true'">v145</PlatformToolset>
+    <PlatformToolset Condition="'$(VoIPModemXP)'=='true'">v141_xp</PlatformToolset>
+    <!-- MSB8051 "targeting Windows XP is deprecated": known and deliberate. -->
+    <XPDeprecationWarning Condition="'$(VoIPModemXP)'=='true'">false</XPDeprecationWarning>
+  </PropertyGroup>
+</Project>

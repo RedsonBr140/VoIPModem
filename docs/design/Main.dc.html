@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VoIPModem Manager</title>
+<script src="./_runtime/react.js"></script>
+<script src="./_runtime/react-dom.js"></script>
+<script src="./_runtime/support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#0a246a}a:hover{color:#000080}
+.w2k3{font-family:Tahoma,Verdana,Geneva,sans-serif;font-size:11px;color:#000}
+.w2k3 button,.w2k3 input,.w2k3 select{font-family:Tahoma,Verdana,sans-serif;font-size:11px;color:#000}
+.w2k3 button{background:#d4d0c8;border:1px solid;border-color:#fff #404040 #404040 #fff;padding:2px 6px;cursor:default}
+.w2k3 button:disabled{color:#808080;text-shadow:1px 1px 0 #fff}
+.flat{border-color:#d4d0c8 !important;background:transparent !important}
+.flat:hover:enabled{border-color:#fff #404040 #404040 #fff !important;background:#d8d4cc !important}
+.mi{display:flex;width:100%;align-items:center;gap:14px;border-color:#d4d0c8 !important;background:#d4d0c8 !important;padding:3px 8px 3px 20px;text-align:left}
+.mi:hover:enabled{background:#0a246a !important;color:#fff !important}
+.mi:hover:enabled span{color:#fff !important}
+.menupop{position:absolute;top:19px;left:0;z-index:30;background:#d4d0c8;border:1px solid;border-color:#fff #404040 #404040 #fff;padding:2px;box-shadow:2px 2px 2px rgba(0,0,0,.28)}
+.sunken{border:1px solid;border-color:#808080 #fff #fff #808080;background:#fff}
+.gbox{border:1px solid #9a9a9a;box-shadow:1px 1px 0 #fff;margin:0;padding:6px 7px 7px;min-width:0}
+.gbox>legend{padding:0 4px;font-weight:bold}
+.sb{border:1px solid;border-color:#808080 #fff #fff #808080;padding:2px 5px;display:flex;align-items:center;white-space:nowrap;overflow:hidden}
+table.lv{border-collapse:collapse;width:100%;table-layout:fixed}
+table.lv th{font-weight:normal;text-align:left;background:#d4d0c8;border:1px solid;border-color:#fff #808080 #808080 #fff;padding:2px 4px;height:17px;overflow:hidden}
+table.lv td{padding:0;height:17px}
+table.lv td button{display:block;width:100%;text-align:left;border-color:transparent !important;background:transparent !important;padding:1px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+table.lv tr.sel td button{background:#0a246a !important;color:#fff !important}
+table.st td{padding:1px 0;white-space:nowrap}
+table.st td.v{text-align:right;font-weight:bold}
+.fld{border:1px solid;border-color:#808080 #fff #fff #808080;background:#fff;padding:2px 3px;outline:0}
+.tab{border:1px solid;border-color:#fff #404040 #404040 #fff;border-bottom:0;background:#d4d0c8;padding:3px 10px;margin-right:2px;position:relative;top:1px}
+.tab.on{background:#d4d0c8;padding:4px 11px 4px;top:0;font-weight:bold}
+</style>
+</helmet>
+<div class="w2k3" style="width:1024px;height:768px;box-sizing:border-box;background:#d4d0c8;display:flex;flex-direction:column;border:1px solid;border-color:#fff #404040 #404040 #fff;position:relative;overflow:hidden">
+
+  <div style="height:24px;flex:none;background:linear-gradient(180deg,#0a246a 0%,#15337f 45%,#3a6ea5 100%);display:flex;align-items:center;padding:0 3px;gap:5px">
+    <div style="width:16px;height:16px;flex:none;background:#d4d0c8;border:1px solid #404040;display:flex;align-items:center;justify-content:center">
+      <svg width="12" height="10" viewBox="0 0 12 10" aria-hidden="true"><rect x="0.5" y="0.5" width="11" height="6" fill="#fff" stroke="#000"></rect><rect x="2" y="8" width="8" height="1.5" fill="#008000"></rect><rect x="2" y="2" width="4" height="1" fill="#0a246a"></rect><rect x="2" y="4" width="7" height="1" fill="#0a246a"></rect></svg>
+    </div>
+    <span style="color:#fff;font-weight:bold;flex:1;text-shadow:1px 1px 1px rgba(0,0,0,.45)">VoIPModem Manager — voipmodem.ini [{{count}} lines] — SRV-GW01</span>
+    <button type="button" aria-label="Minimize" style="width:21px;height:19px;padding:0;line-height:1">_</button>
+    <button type="button" aria-label="Maximize" style="width:21px;height:19px;padding:0;line-height:1">□</button>
+    <button type="button" aria-label="Close" style="width:21px;height:19px;padding:0;line-height:1;font-weight:bold">×</button>
+  </div>
+
+  <div style="height:20px;flex:none;display:flex;align-items:stretch;padding:0 2px;border-bottom:1px solid #808080;position:relative;z-index:30">
+    <sc-for list="{{menus}}" as="m" hint-placeholder-count="6">
+      <div style="position:relative">
+        <button type="button" class="flat" style="height:100%;padding:0 7px;background:{{m.bg}} !important" onClick="{{m.toggle}}">{{m.label}}</button>
+        <sc-if value="{{m.open}}" hint-placeholder-val="{{false}}">
+          <div class="menupop" style="width:{{m.w}}">
+            <sc-for list="{{m.items}}" as="it" hint-placeholder-count="4">
+              <sc-if value="{{it.sep}}" hint-placeholder-val="{{false}}">
+                <div style="border-top:1px solid #808080;border-bottom:1px solid #fff;margin:3px 2px"></div>
+              </sc-if>
+              <sc-if value="{{it.row}}" hint-placeholder-val="{{true}}">
+                <button type="button" class="mi" disabled="{{it.off}}" onClick="{{it.act}}">
+                  <span style="flex:1">{{it.label}}</span><span style="color:#444">{{it.accel}}</span>
+                </button>
+              </sc-if>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+    </sc-for>
+    <span style="flex:1"></span>
+    <span style="align-self:center;padding-right:4px;color:#404040">Inbound answering service</span>
+  </div>
+
+  <div style="height:29px;flex:none;display:flex;align-items:center;gap:2px;padding:2px 4px;border-top:1px solid #fff;border-bottom:1px solid #808080">
+    <sc-for list="{{tools}}" as="t" hint-placeholder-count="6">
+      <button type="button" class="flat" style="height:23px;padding:2px 7px" disabled="{{t.off}}" onClick="{{t.act}}">{{t.label}}</button>
+    </sc-for>
+    <div style="width:2px;height:20px;border-left:1px solid #808080;border-right:1px solid #fff;margin:0 3px"></div>
+    <label for="filt">Show:</label>
+    <select id="filt" class="fld" style="height:18px;width:118px" value="{{filter}}" onChange="{{setFilter}}">
+      <option value="all">All lines</option>
+      <option value="busy">On a call</option>
+      <option value="idle">Waiting for calls</option>
+      <option value="err">Faulted</option>
+    </select>
+    <span style="flex:1"></span>
+    <span>Auto-answer after {{rings}} ring(s) · Poll 1000 ms</span>
+  </div>
+
+  <div style="flex:1;min-height:0;padding:4px;display:flex;flex-direction:column;gap:4px">
+
+    <fieldset class="gbox" style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <legend>Registered modem lines — {{count}} configured, {{busy}} on a call, {{waiting}} waiting</legend>
+      <div class="sunken" style="flex:1;min-height:0;overflow:hidden">
+        <table class="lv">
+          
+          <thead><tr><th>#</th><th>COM port</th><th>SIP ext.</th><th>State</th><th>Calling party</th><th>Modulation</th><th>TX/RX bps</th><th>Duration</th><th>Bytes TX/RX</th><th>Retr.</th><th>Err</th><th>Driver binding</th></tr></thead>
+          <tbody>
+            <sc-for list="{{lines}}" as="l" hint-placeholder-count="12">
+              <tr class="{{l.cls}}">
+                <td><button type="button" onClick="{{l.pick}}">{{l.n}}</button></td>
+                <td><button type="button" onClick="{{l.pick}}">{{l.com}}</button></td>
+                <td><button type="button" onClick="{{l.pick}}">{{l.ext}}</button></td>
+                <td><button type="button" onClick="{{l.pick}}" style="color:{{l.color}};font-weight:bold">{{l.state}}</button></td>
+                <td><button type="button" onClick="{{l.pick}}">{{l.remote}}</button></td>
+                <td><button type="button" onClick="{{l.pick}}">{{l.mod}}</button></td>
+                <td><button type="button" onClick="{{l.pick}}">{{l.rate}}</button></td>
+                <td><button type="button" onClick="{{l.pick}}">{{l.dur}}</button></td>
+                <td><button type="button" onClick="{{l.pick}}">{{l.bytes}}</button></td>
+                <td><button type="button" onClick="{{l.pick}}">{{l.retr}}</button></td>
+                <td><button type="button" onClick="{{l.pick}}">{{l.err}}</button></td>
+                <td><button type="button" onClick="{{l.pick}}">{{l.drv}}</button></td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </fieldset>
+
+    <div style="height:242px;flex:none;display:flex;gap:4px;min-width:0">
+
+      <fieldset class="gbox" style="width:236px;flex:none">
+        <legend>Inbound call statistics</legend>
+        <table class="st" style="width:100%">
+          <tbody>
+            <sc-for list="{{stats}}" as="s" hint-placeholder-count="10">
+              <tr><td>{{s.k}}</td><td class="v">{{s.v}}</td></tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </fieldset>
+
+      <fieldset class="gbox" style="width:296px;flex:none">
+        <legend>Negotiation &amp; carrier</legend>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <sc-for list="{{carriers}}" as="c" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:5px">
+              <span style="width:104px;flex:none">{{c.k}}</span>
+              <div class="sunken" style="flex:1;height:12px;padding:1px">
+                <div style="height:10px;width:{{c.w}};background:#0a246a"></div>
+              </div>
+              <span style="width:30px;flex:none;text-align:right">{{c.p}}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="border-top:1px solid #808080;border-bottom:1px solid #fff;margin:7px 0 6px"></div>
+        <table class="st" style="width:100%">
+          <tbody>
+            <tr><td>Retrains / fallbacks</td><td class="v">214 / 86</td></tr>
+            <tr><td>Error correction</td><td class="v">V.42 / V.42bis</td></tr>
+            <tr><td>Softmodem engine</td><td class="v">libv90modem</td></tr>
+            <tr><td>RTP codec / ptime</td><td class="v">{{codec}} / {{ptime}} ms</td></tr>
+            <tr><td>Jitter (avg / max)</td><td class="v">4 ms / 19 ms</td></tr>
+            <tr><td>Packet loss</td><td class="v">0.02 %</td></tr>
+          </tbody>
+        </table>
+      </fieldset>
+
+      <fieldset class="gbox" style="flex:1;min-width:0;display:flex;flex-direction:column">
+        <legend>Event log — {{logfile}}</legend>
+        <div class="sunken" style="flex:1;min-height:0;overflow:hidden;padding:2px 3px;font-family:'Courier New',monospace">
+          <sc-for list="{{log}}" as="e" hint-placeholder-count="13">
+            <div style="white-space:nowrap;overflow:hidden"><span style="color:#444">{{e.t}}</span> <span style="color:{{e.c}}">{{e.m}}</span></div>
+          </sc-for>
+        </div>
+      </fieldset>
+
+    </div>
+  </div>
+
+  <div style="height:23px;flex:none;display:flex;gap:2px;padding:1px 2px;border-top:1px solid #fff">
+    <div class="sb" style="flex:1">{{hint}}</div>
+    <div class="sb" style="width:214px"><span style="width:7px;height:7px;background:#006600;border:1px solid #003300;margin-right:5px"></span>SIP: registered ({{registrar}})</div>
+    <div class="sb" style="width:132px">Answering: {{busy}} / {{count}}</div>
+    <div class="sb" style="width:122px">RTP: {{rtp}} kbit/s</div>
+    <div class="sb" style="width:86px">CPU: 23 %</div>
+    <div class="sb" style="width:148px">24/11/2026 14:46</div>
+  </div>
+
+  <sc-if value="{{menuOpen}}" hint-placeholder-val="{{false}}">
+    <button type="button" aria-label="Close menu" onClick="{{closeMenu}}" style="position:absolute;inset:0;z-index:25;border:0 !important;background:transparent !important;padding:0"></button>
+  </sc-if>
+
+  <sc-if value="{{dlgNew}}" hint-placeholder-val="{{false}}">
+    <div style="position:absolute;inset:0;z-index:40;background:rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center">
+      <div style="width:396px;background:#d4d0c8;border:1px solid;border-color:#fff #404040 #404040 #fff;box-shadow:3px 3px 6px rgba(0,0,0,.35)">
+        <div style="height:21px;background:linear-gradient(180deg,#0a246a,#3a6ea5);display:flex;align-items:center;padding:0 3px">
+          <span style="color:#fff;font-weight:bold;flex:1;padding-left:3px">Add modem line</span>
+          <button type="button" aria-label="Close" onClick="{{closeDlg}}" style="width:19px;height:17px;padding:0;font-weight:bold;line-height:1">×</button>
+        </div>
+        <div style="padding:10px 12px">
+          <fieldset class="gbox"><legend>New line</legend>
+            <sc-for list="{{newFields}}" as="f" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                <label for="{{f.id}}" style="width:118px;flex:none">{{f.label}}</label>
+                <sc-if value="{{f.isSelect}}" hint-placeholder-val="{{false}}">
+                  <select id="{{f.id}}" class="fld" style="width:190px;height:19px" value="{{f.value}}" onChange="{{f.change}}">
+                    <sc-for list="{{f.options}}" as="o" hint-placeholder-count="3"><option value="{{o}}">{{o}}</option></sc-for>
+                  </select>
+                </sc-if>
+                <sc-if value="{{f.isText}}" hint-placeholder-val="{{true}}">
+                  <input id="{{f.id}}" class="fld" type="{{f.type}}" style="width:184px" value="{{f.value}}" onChange="{{f.change}}">
+                </sc-if>
+              </div>
+            </sc-for>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+              <input id="nauto" type="checkbox" checked="{{newAuto}}" onChange="{{toggleNewAuto}}">
+              <label for="nauto">Answer incoming calls on this line automatically</label>
+            </div>
+          </fieldset>
+          <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:11px">
+            <button type="button" style="width:76px;height:22px" onClick="{{createLine}}">Create</button>
+            <button type="button" style="width:76px;height:22px" onClick="{{closeDlg}}">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{dlgSet}}" hint-placeholder-val="{{false}}">
+    <div style="position:absolute;inset:0;z-index:40;background:rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center">
+      <div style="width:500px;background:#d4d0c8;border:1px solid;border-color:#fff #404040 #404040 #fff;box-shadow:3px 3px 6px rgba(0,0,0,.35)">
+        <div style="height:21px;background:linear-gradient(180deg,#0a246a,#3a6ea5);display:flex;align-items:center;padding:0 3px">
+          <span style="color:#fff;font-weight:bold;flex:1;padding-left:3px">VoIPModem settings — voipmodem.ini</span>
+          <button type="button" aria-label="Close" onClick="{{closeDlg}}" style="width:19px;height:17px;padding:0;font-weight:bold;line-height:1">×</button>
+        </div>
+        <div style="padding:9px 11px 11px">
+          <div style="display:flex;align-items:flex-end;border-bottom:1px solid #fff">
+            <sc-for list="{{tabs}}" as="t" hint-placeholder-count="4">
+              <button type="button" class="{{t.cls}}" onClick="{{t.pick}}">{{t.label}}</button>
+            </sc-for>
+          </div>
+          <div style="border:1px solid;border-color:#fff #404040 #404040 #fff;border-top:0;background:#d4d0c8;padding:12px 13px;height:244px;box-sizing:border-box;overflow:hidden">
+            <sc-for list="{{setFields}}" as="f" hint-placeholder-count="7">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+                <sc-if value="{{f.isCheck}}" hint-placeholder-val="{{false}}">
+                  <span style="width:150px;flex:none"></span>
+                </sc-if>
+                <sc-if value="{{f.hasLabel}}" hint-placeholder-val="{{true}}">
+                  <label for="{{f.id}}" style="width:150px;flex:none">{{f.label}}</label>
+                </sc-if>
+                <sc-if value="{{f.isSelect}}" hint-placeholder-val="{{false}}">
+                  <select id="{{f.id}}" class="fld" style="width:210px;height:19px" value="{{f.value}}" onChange="{{f.change}}">
+                    <sc-for list="{{f.options}}" as="o" hint-placeholder-count="3"><option value="{{o}}">{{o}}</option></sc-for>
+                  </select>
+                </sc-if>
+                <sc-if value="{{f.isText}}" hint-placeholder-val="{{true}}">
+                  <input id="{{f.id}}" class="fld" type="{{f.type}}" style="width:{{f.w}}" value="{{f.value}}" onChange="{{f.change}}">
+                </sc-if>
+                <sc-if value="{{f.isCheck}}" hint-placeholder-val="{{false}}">
+                  <input id="{{f.id}}" type="checkbox" checked="{{f.value}}" onChange="{{f.change}}">
+                  <label for="{{f.id}}">{{f.label}}</label>
+                </sc-if>
+                <span style="color:#404040">{{f.note}}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;align-items:center;margin-top:11px">
+            <span style="color:#404040">Changes are written to voipmodem.ini and applied to idle lines.</span>
+            <span style="flex:1"></span>
+            <button type="button" style="width:76px;height:22px;margin-right:6px" onClick="{{closeDlg}}">OK</button>
+            <button type="button" style="width:76px;height:22px" onClick="{{closeDlg}}">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1024,"height":768}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    const C = { up: '#006600', neg: '#8a5a00', idle: '#555555', err: '#9b0000' };
+    const mk = (n, com, ext, state, remote, mod, rate, dur, bytes, retr, err, drv, kind) =>
+      ({ n: n, com: com, ext: ext, state: state, remote: remote, mod: mod, rate: rate, dur: dur,
+         bytes: bytes, retr: retr, err: err, drv: drv, kind: kind, color: C[kind] });
+    this.state = {
+      menuOpen: null, dialog: null, tab: 0, sel: 0, filter: 'all',
+      hint: 'Ready',
+      settings: {
+        registrar: 'pbx.lan', sipPort: '5060', user: 'voipmodem', pass: 'secret',
+        transport: 'UDP', expires: '3600', regOnStart: true,
+        codec: 'G.711 a-law', ptime: '20', rtpRange: '16384-16500', jitter: '60',
+        dtmf: 'RFC 2833', echo: false,
+        maxRate: 'V.90 56000', minRate: 'V.21 300', v42: true, v42bis: true,
+        rings: '1', carrierTimeout: '45', v92: 'Disabled (untested)',
+        logfile: 'C:\\VoIPModem\\voipmodem.log', level: 'Info', atTrace: true,
+        rotate: '4096', keep: '10'
+      },
+      newLine: { com: 'COM23', ext: '2113', pass: '', maxRate: 'V.90 56000', driver: 'Standard 56000 bps Modem' },
+      newAuto: true,
+      lines: [
+        mk('1','COM11','2101','Connected','5551204','V.90','56000/26400','00:12:48','1.82 M / 410 K','3','0','Standard 56000 bps Modem','up'),
+        mk('2','COM12','2102','Connected','5559911','V.34','31200/14400','00:04:07','318 K / 96 K','11','2','Standard 33600 bps Modem','up'),
+        mk('3','COM13','2103','Handshake','5550177','V.8 bis','\u2014','00:00:06','\u2014','0','0','Standard 56000 bps Modem','neg'),
+        mk('4','COM14','2104','Ringing','5552048','\u2014','\u2014','00:00:02','\u2014','0','0','Standard 56000 bps Modem','neg'),
+        mk('5','COM15','2105','Connected','5550042','V.34','33600/33600','01:46:21','9.14 M / 2.07 M','27','1','Standard 33600 bps Modem','up'),
+        mk('6','COM16','2106','Waiting','\u2014','\u2014','\u2014','\u2014','\u2014','0','0','Standard 56000 bps Modem','idle'),
+        mk('7','COM17','2107','Answering','5557310','\u2014','\u2014','00:00:11','\u2014','0','0','Standard 33600 bps Modem','neg'),
+        mk('8','COM18','2108','Connected','5558800','V.21','300/300','00:31:55','14 K / 9 K','0','0','Standard 2400 bps Modem','up'),
+        mk('9','COM19','2109','Waiting','\u2014','\u2014','\u2014','\u2014','\u2014','0','0','Standard 56000 bps Modem','idle'),
+        mk('10','COM20','2110','Connected','5556310','V.32 bis','14400/14400','00:08:02','121 K / 64 K','6','0','Standard 14400 bps Modem','up'),
+        mk('11','COM21','2111','No carrier','5557722','\u2014','\u2014','\u2014','\u2014','4','1','Standard 56000 bps Modem','err'),
+        mk('12','COM22','2112','Port closed','\u2014','\u2014','\u2014','\u2014','\u2014','0','0','(not bound)','err')
+      ],
+      log: [
+        ['14:46:02', '[COM17] RING 2 \u2014 answering (ATA, S0=1)', '#8a5a00'],
+        ['14:46:01', '[SIP ] 200 OK sent, RTP 10.4.1.12:16392 <-> 10.4.1.30:4020', '#000'],
+        ['14:46:00', '[SIP ] INVITE from 5557310 -> ext 2107', '#000'],
+        ['14:45:48', '[COM13] answer tone sent, V.8 bis menu', '#8a5a00'],
+        ['14:45:44', '[COM14] RING 1 (caller 5552048)', '#000'],
+        ['14:45:31', '[COM12] CONNECT 31200/V.34 TX 31200 RX 14400', '#006600'],
+        ['14:45:29', '[COM12] rate renegotiation, SNR 31 dB', '#000'],
+        ['14:45:03', '[COM21] NO CARRIER after 42 s of training', '#9b0000'],
+        ['14:44:58', '[COM21] caller 5557722 hung up during training', '#9b0000'],
+        ['14:44:12', '[COM11] CONNECT 56000/V.90 (V.42bis on)', '#006600'],
+        ['14:43:57', '[SIP ] REGISTER ok, expires 3600 (12 of 12)', '#006600'],
+        ['14:43:40', '[COM22] CreateFile \\\\.\\COM22 failed: 0x02', '#9b0000'],
+        ['14:43:40', '[INIT] libv90modem 12 contexts, 8 kHz a-law', '#000'],
+        ['14:43:39', '[INIT] voipmodem.ini parsed, 12 line sections', '#000']
+      ].map(function (p) { return { t: p[0], m: p[1], c: p[2] }; })
+    };
+  }
+
+  note(msg, color) {
+    const stamp = '14:46:' + String(10 + (this.state.log.length % 40)).slice(-2);
+    this.setState({ log: [{ t: stamp, m: msg, c: color || '#000' }].concat(this.state.log).slice(0, 14) });
+  }
+
+  close(extra) { this.setState(Object.assign({ menuOpen: null, dialog: null }, extra || {})); }
+
+  setS(key) {
+    const self = this;
+    return function (e) {
+      const t = e.target;
+      const v = t.type === 'checkbox' ? t.checked : t.value;
+      self.setState({ settings: Object.assign({}, self.state.settings, { [key]: v }) });
+    };
+  }
+
+  setN(key) {
+    const self = this;
+    return function (e) {
+      self.setState({ newLine: Object.assign({}, self.state.newLine, { [key]: e.target.value }) });
+    };
+  }
+
+  addLine() {
+    const n = this.state.newLine;
+    const row = {
+      n: String(this.state.lines.length + 1), com: n.com, ext: n.ext,
+      state: this.state.newAuto ? 'Waiting' : 'Idle (AT)', remote: '\u2014', mod: '\u2014',
+      rate: '\u2014', dur: '\u2014', bytes: '\u2014', retr: '0', err: '0',
+      drv: n.driver, kind: 'idle', color: '#555555'
+    };
+    const num = parseInt(n.com.replace(/\D/g, ''), 10) || 22;
+    this.setState({
+      lines: this.state.lines.concat([row]),
+      sel: this.state.lines.length,
+      newLine: Object.assign({}, n, { com: 'COM' + (num + 1), ext: String(parseInt(n.ext, 10) + 1) }),
+      menuOpen: null, dialog: null,
+      hint: 'Line ' + n.com + ' added \u2014 waiting for calls on extension ' + n.ext
+    });
+    this.note('[INIT] ' + n.com + ' bound to ext ' + n.ext + ', ' + n.maxRate + ' max', '#006600');
+  }
+
+  lineAction(verb) {
+    const l = this.state.lines[this.state.sel];
+    if (!l) { return; }
+    const lines = this.state.lines.slice();
+    if (verb === 'Hang up') {
+      lines[this.state.sel] = Object.assign({}, l, { state: 'Waiting', remote: '\u2014', mod: '\u2014', rate: '\u2014', dur: '\u2014', kind: 'idle', color: '#555555' });
+      this.note('[' + l.com + '] ATH \u2014 call cleared, BYE sent', '#8a5a00');
+    } else if (verb === 'Answer now') {
+      lines[this.state.sel] = Object.assign({}, l, { state: 'Handshake', mod: 'V.8 bis', kind: 'neg', color: '#8a5a00' });
+      this.note('[' + l.com + '] ATA \u2014 answer tone sent', '#8a5a00');
+    } else if (verb === 'Remove line') {
+      lines.splice(this.state.sel, 1);
+      this.note('[INIT] ' + l.com + ' removed from voipmodem.ini', '#9b0000');
+    } else {
+      lines[this.state.sel] = Object.assign({}, l, { state: 'Waiting', remote: '\u2014', kind: 'idle', color: '#555555', err: '0' });
+      this.note('[' + l.com + '] port reset, libv90modem context reloaded', '#000');
+    }
+    this.setState({ lines: lines, sel: Math.min(this.state.sel, lines.length - 1), menuOpen: null, hint: verb + ' \u2014 ' + l.com });
+  }
+
+  field(id, label, key, kind, opts, note, w) {
+    const s = this.state.settings;
+    return {
+      id: id, label: label, note: note || '', value: s[key], change: this.setS(key),
+      isSelect: kind === 'enum', isText: kind === 'text' || kind === 'pass',
+      isCheck: kind === 'check', hasLabel: kind !== 'check',
+      type: kind === 'pass' ? 'password' : 'text', options: opts || [], w: w || '210px'
+    };
+  }
+
+  renderVals() {
+    const self = this;
+    const st = this.state;
+    const s = st.settings;
+    const sel = st.lines[st.sel];
+    const selState = sel ? sel.state : '';
+    const busy = st.lines.filter(function (l) { return l.kind === 'up' || l.kind === 'neg'; }).length;
+    const waiting = st.lines.filter(function (l) { return l.kind === 'idle'; }).length;
+
+    const item = function (label, accel, act, off) {
+      return { row: true, sep: false, label: label, accel: accel || '', off: !!off, act: act || function () { self.close(); } };
+    };
+    const sep = { row: false, sep: true, label: '', accel: '', off: false, act: null };
+    const open = function (name) { return function () { self.setState({ dialog: name, menuOpen: null }); }; };
+    const act = function (verb) { return function () { self.lineAction(verb); }; };
+
+    const defs = [
+      ['File', 'file', '206px', [
+        item('Save configuration', 'Ctrl+S'), item('Reload voipmodem.ini', 'F5'), sep,
+        item('Export statistics\u2026'), item('Export event log\u2026'), sep,
+        item('Stop service'), item('Exit', 'Alt+F4')
+      ]],
+      ['Lines', 'lines', '220px', [
+        item('Answer now', '', act('Answer now'), !sel || selState !== 'Ringing'),
+        item('Hang up', 'Ctrl+H', act('Hang up'), !sel || sel.kind === 'idle'),
+        item('Reset line', '', act('Reset line'), !sel), sep,
+        item('Take line out of service', '', undefined, !sel),
+        item('Put all lines in service'), sep,
+        item('Line properties\u2026', 'Alt+Enter', undefined, !sel)
+      ]],
+      ['SIP', 'sip', '214px', [
+        item('Re-register all extensions'), item('Unregister'), sep,
+        item('Account settings\u2026', '', open('settings')), item('Show SIP trace\u2026')
+      ]],
+      ['Modem', 'modem', '232px', [
+        item('New modem line\u2026', 'Ctrl+N', open('new')),
+        item('Remove selected line', 'Del', act('Remove line'), !sel), sep,
+        item('Modem defaults\u2026', '', function () { self.setState({ dialog: 'settings', tab: 2, menuOpen: null }); }),
+        item('Loopback self-test\u2026'), item('Reload libv90modem contexts')
+      ]],
+      ['View', 'view', '206px', [
+        item('Toolbar'), item('Status bar'), item('Event log pane'), sep, item('Refresh now', 'F5')
+      ]],
+      ['Tools', 'tools', '214px', [
+        item('Settings\u2026', '', open('settings')), item('AT command console\u2026'), sep,
+        item('com0com port pairs\u2026'), item('Driver bindings\u2026')
+      ]],
+      ['Help', 'help', '196px', [
+        item('Contents', 'F1'), item('Readme'), sep, item('About VoIPModem\u2026')
+      ]]
+    ];
+
+    const menus = defs.map(function (d) {
+      const key = d[1];
+      return {
+        label: d[0], w: d[2], items: d[3], open: st.menuOpen === key,
+        bg: st.menuOpen === key ? '#0a246a' : 'transparent',
+        toggle: function () { self.setState({ menuOpen: st.menuOpen === key ? null : key }); }
+      };
+    });
+
+    const tools = [
+      ['Answer now', 'Answer now', !sel || selState !== 'Ringing'],
+      ['Hang up', 'Hang up', !sel || (sel && sel.kind === 'idle')],
+      ['Reset line', 'Reset line', !sel]
+    ].map(function (t) { return { label: t[0], off: t[2], act: act(t[1]) }; })
+      .concat([
+        { label: 'New line\u2026', off: false, act: open('new') },
+        { label: 'Re-register', off: false, act: function () { self.note('[SIP ] REGISTER sent for all extensions', '#006600'); self.setState({ hint: 'Re-registering all extensions\u2026' }); } },
+        { label: 'Reload config', off: false, act: function () { self.note('[INIT] voipmodem.ini reloaded', '#000'); self.setState({ hint: 'Configuration reloaded' }); } },
+        { label: 'Settings\u2026', off: false, act: open('settings') }
+      ]);
+
+    const tabLabels = ['SIP account', 'Audio / RTP', 'Modem defaults', 'Logging'];
+    const tabs = tabLabels.map(function (label, i) {
+      return { label: label, cls: 'tab' + (st.tab === i ? ' on' : ''), pick: function () { self.setState({ tab: i }); } };
+    });
+
+    const pages = [
+      [
+        this.field('s1', 'SIP registrar', 'registrar', 'text'),
+        this.field('s2', 'Registrar port', 'sipPort', 'text', null, '', '70px'),
+        this.field('s3', 'Extension / user', 'user', 'text'),
+        this.field('s4', 'Password', 'pass', 'pass'),
+        this.field('s5', 'Transport', 'transport', 'enum', ['UDP', 'TCP', 'TLS']),
+        this.field('s6', 'Register expiry (s)', 'expires', 'text', null, '', '70px'),
+        this.field('s7', 'Register all lines when the service starts', 'regOnStart', 'check')
+      ],
+      [
+        this.field('a1', 'Codec', 'codec', 'enum', ['G.711 a-law', 'G.711 u-law']),
+        this.field('a2', 'Packet time (ms)', 'ptime', 'enum', ['10', '20', '30']),
+        this.field('a3', 'RTP port range', 'rtpRange', 'text', null, '', '120px'),
+        this.field('a4', 'Jitter buffer (ms)', 'jitter', 'text', null, 'raise for lossy trunks', '70px'),
+        this.field('a5', 'DTMF detection', 'dtmf', 'enum', ['RFC 2833', 'In-band', 'SIP INFO']),
+        this.field('a6', 'Echo canceller (degrades modem training)', 'echo', 'check')
+      ],
+      [
+        this.field('m1', 'Maximum rate', 'maxRate', 'enum', ['V.90 56000', 'V.34 33600', 'V.32 bis 14400', 'V.21 300']),
+        this.field('m2', 'Minimum rate', 'minRate', 'enum', ['V.21 300', 'V.32 bis 14400', 'V.34 33600']),
+        this.field('m3', 'Answer after N rings', 'rings', 'enum', ['1', '2', '3', '4']),
+        this.field('m4', 'Carrier loss timeout (s)', 'carrierTimeout', 'text', null, '', '70px'),
+        this.field('m5', 'V.92 features', 'v92', 'enum', ['Disabled (untested)', 'Quick connect', 'Modem on hold']),
+        this.field('m6', 'V.42 error correction', 'v42', 'check'),
+        this.field('m7', 'V.42bis compression', 'v42bis', 'check')
+      ],
+      [
+        this.field('g1', 'Log file', 'logfile', 'text', null, '', '250px'),
+        this.field('g2', 'Log level', 'level', 'enum', ['Error', 'Warning', 'Info', 'Debug']),
+        this.field('g3', 'Rotate at (KB)', 'rotate', 'text', null, '', '70px'),
+        this.field('g4', 'Files to keep', 'keep', 'text', null, '', '70px'),
+        this.field('g5', 'Record AT commands and responses', 'atTrace', 'check')
+      ]
+    ];
+
+    const newDefs = [
+      ['n1', 'COM port (com0com)', 'com', ['COM23', 'COM24', 'COM25', 'COM26']],
+      ['n2', 'SIP extension', 'ext', null],
+      ['n3', 'SIP password', 'pass', null],
+      ['n4', 'Maximum rate', 'maxRate', ['V.90 56000', 'V.34 33600', 'V.32 bis 14400', 'V.21 300']],
+      ['n5', 'Driver binding', 'driver', ['Standard 56000 bps Modem', 'Standard 33600 bps Modem', 'Standard 14400 bps Modem', '(not bound)']]
+    ];
+
+    return {
+      menus: menus, tools: tools, tabs: tabs,
+      menuOpen: !!st.menuOpen, closeMenu: function () { self.setState({ menuOpen: null }); },
+      dlgNew: st.dialog === 'new', dlgSet: st.dialog === 'settings',
+      closeDlg: function () { self.close(); },
+      createLine: function () { self.addLine(); },
+      newAuto: st.newAuto, toggleNewAuto: function (e) { self.setState({ newAuto: e.target.checked }); },
+      filter: st.filter, setFilter: function (e) { self.setState({ filter: e.target.value }); },
+      setFields: pages[st.tab],
+      newFields: newDefs.map(function (d) {
+        return {
+          id: d[0], label: d[1], value: st.newLine[d[2]], change: self.setN(d[2]),
+          isSelect: !!d[3], isText: !d[3], options: d[3] || [],
+          type: d[2] === 'pass' ? 'password' : 'text'
+        };
+      }),
+      lines: st.lines.map(function (l, i) {
+        const show = st.filter === 'all'
+          || (st.filter === 'busy' && (l.kind === 'up' || l.kind === 'neg'))
+          || (st.filter === 'idle' && l.kind === 'idle')
+          || (st.filter === 'err' && l.kind === 'err');
+        return Object.assign({}, l, {
+          cls: (i === st.sel ? 'sel' : '') + (show ? '' : ' hide'),
+          color: i === st.sel ? '#ffffff' : l.color,
+          pick: function () { self.setState({ sel: i, hint: 'Line ' + l.com + ' \u2014 ext ' + l.ext + ' \u2014 ' + l.state }); }
+        });
+      }).filter(function (l) { return l.cls.indexOf('hide') === -1; }),
+      count: st.lines.length, busy: busy, waiting: waiting,
+      hint: st.hint, rings: s.rings, codec: s.codec, ptime: s.ptime,
+      registrar: s.registrar + ':' + s.sipPort, logfile: s.logfile.split('\\').pop(),
+      rtp: String(busy * 64),
+      stats: [
+        ['Calls answered', '1,428'], ['Trained successfully', '1,301'], ['Failed to train', '127'],
+        ['Rejected (all lines busy)', '48'], ['Caller hung up early', '61'], ['Avg. call length', '00:04:17'],
+        ['Longest call', '03:52:40'], ['Peak lines answering', '11 of ' + st.lines.length],
+        ['Bytes in / out', '3.41 G / 812 M'], ['AT commands parsed', '48,776'],
+        ['Service uptime', '11d 04:22:07'], ['Config loaded', '13/11/2026 09:02']
+      ].map(function (p) { return { k: p[0], v: p[1] }; }),
+      carriers: [['V.90 56000', 42], ['V.34 33600', 27], ['V.34 31200', 18], ['V.32 bis 14400', 8], ['V.21 300', 5]]
+        .map(function (p) { return { k: p[0], p: p[1] + '%', w: p[1] + '%' }; }),
+      log: st.log
+    };
+  }
+}
+</script>
+</body>
+</html>

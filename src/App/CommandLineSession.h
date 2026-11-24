@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 
@@ -38,6 +39,12 @@ public:
     // instead of duplicating it for the auto-answer case.
     void TriggerAutoAnswer();
 
+    // Command lines executed so far (for the control API statistics).
+    unsigned long CommandCount() const { return commandCount_; }
+
+    // Logs every command line and response at Info ([Logging] TraceAT).
+    void SetTrace(bool enabled) { trace_ = enabled; }
+
 private:
     void ProcessLine(const std::string& line);
     void SendResponse(const ExecutionOutcome& outcome);
@@ -47,6 +54,8 @@ private:
     ModemStateMachine& core_;
     TaggedLogger& logger_;
     std::string lineBuffer_;
+    unsigned long commandCount_ = 0;
+    std::atomic<bool> trace_{false}; // set from the main thread (config change), read on the line thread
 
     static constexpr size_t kMaxLineLength = 256;
 };

@@ -1,104 +1,142 @@
 # VoIPModem
 
-A Windows-first software modem that emulates a Hayes-compatible serial
-modem and transports modem calls over SIP/VoIP. See
-`docs/PROJECT_SPEC.md` for the full specification, `docs/ARCHITECTURE.md`
-for what is actually implemented, and `docs/ROADMAP.md` for phase status.
+[![CI](https://github.com/RedsonBr140/VoIPModem/actions/workflows/ci.yml/badge.svg)](https://github.com/RedsonBr140/VoIPModem/actions/workflows/ci.yml)
 
-**Current status: Phases 1-3 complete and verified live** against a
-real Asterisk server — serial/Hayes command mode, SIP registration,
-outgoing and incoming calls, RING, `ATA`, S0 auto-answer, and two
-simultaneously registered extensions reaching `CONNECT`, are all
-confirmed working. Phase 3 (RTP audio) is verified via a physical
-analog line dialed into a registered extension: G.711-only codec
-negotiation and modem-tone-preserving media settings (no VAD/echo
-cancellation, native 8kHz) are in place, and call audio — recorded to a
-WAV file and a looping test tone played back, rather than a live sound
-device, since this dev machine has no microphone at the Windows API
-level and pjsua2's device layer is duplex-only (see
-`docs/ARCHITECTURE.md` "RTP audio (Phase 3)") — came through clean and
-audible. **Phase 4 (modem DSP) is in progress, from scratch** — a V.21
-FSK modulator/demodulator and a full ITU-T V.8 handshake (ANSam/CM/JM/
-CJ) are implemented and unit-tested (including an in-process loopback
-simulation that reaches a negotiated outcome end to end), and wired
-into real call audio. **Live-tested between two real VoIPModem
-instances over Asterisk**: reached a negotiated outcome on both sides
-at least once, but was **not initially reliable** — real audio jitter
-intermittently broke the handshake's receiver sync in ways the loopback
-simulation never exercised, because the FSK demodulator had no real
-symbol-timing/clock recovery, just a one-shot sync heuristic. A real
-early-late-gate-plus-PI-loop symbol-timing recovery has since been
-added and re-verified live (5/5 clean negotiations, no recurrence of
-the earlier failures); the lazy "sync on first loud sample" heuristic
-that decides *when* a demodulator starts still exists underneath it,
-and real carrier/clock recovery for actual V.32bis/V.34 modulation is
-separate, harder work still ahead. See `docs/ROADMAP.md` Phase 4 for
-the live-test findings and what's next. There is still no
-actual V.32bis/V.34
-modulation (QAM, scrambler, equalizer, trellis coding) — V.8 only
-negotiates which modulation to use next, it doesn't implement any of
-them.
+A modem bank in software for Windows. Each line is a Hayes-compatible
+modem on a (virtual) COM port on one side and a SIP extension on the
+other. When a call comes in or goes out, the call's G.711 audio runs
+through a real softmodem,
+[libv90modem](https://github.com/georgica/libv90modem): V.8, then V.21
+up to V.34 and V.90/V.92, with V.42 error control and V.42bis/V.44
+compression. The resulting data stream is what the COM port carries, so
+Windows' own modem driver and RAS can use the line like a hardware modem.
+
+Two programs:
+
+- **`VoIPModem.exe`**, the modem bank. It runs headless, in a console or
+  as a Windows service, and serves a small control API (JSON over TCP,
+  localhost by default).
+- **`VoIPModemManager.exe`** (VoIPModem Manager), the operator's window:
+  every line's state, caller, modulation and rates, call statistics,
+  the event log; answer, hang up, reset, take lines out of service, add
+  and edit lines and settings. It talks only to the API, so the service
+  runs without it, and it can manage a service on another computer.
+
+Docs:
+
+- `docs/PROJECT_SPEC.md`: requirements and goals.
+- `docs/ARCHITECTURE.md`: how it works.
+- `docs/CONTROL_API.md`: the control API, for the Manager or your own scripts.
+- `docs/ROADMAP.md`: phase status and test results.
+- `docs/design/`: the Manager's design mock-up.
+
+## Status
+
+Serial/Hayes command mode, SIP calls (both directions, multiple lines)
+and RTP audio are complete and verified against Asterisk. Real modem data
+links work: answering, VoIPModem connected at **V.90 56000/26400** with
+V.42 LAPM and V.44 compression; calling, at **V.34 31200/14400** and V.21.
+Those tests used a SIP software modem (BinModem) as the far end. A
+physical analog modem through the FXS gateway has not been tried yet,
+and V.92 does not connect yet. RAS/PPP (Phase 5) is not started. The
+service mode, control API and Manager are new: built and tested here
+(unit tests, the API end to end, the Manager driven against a running
+service), not yet through a live modem call. Details in `docs/ROADMAP.md`.
+
+## Licence
+
+VoIPModem links libv90modem, which is GPL-2.0-only, and PJSIP (GPL-2.0
+or later). A distributed VoIPModem binary is therefore under GPL-2.0.
+VoIPModem and the Manager also use JSON for Modern C++ (MIT,
+`third_party/nlohmann`).
 
 ## Build
 
 Requires Visual Studio with the C++ desktop workload (MSVC toolset
-`v145` or adjust `PlatformToolset` in the `.vcxproj` files to match what
-you have installed).
+`v145`, or pass `/p:PlatformToolset=` with yours). Platforms: `x64` and
+`Win32` (32-bit). These builds need Windows Vista or later; Windows XP and
+Server 2003 need a separate build (see `docs/ROADMAP.md`, Phase 6).
 
-**One-time setup** (PJSIP, vendored as a git submodule and built from
-source — see `docs/ARCHITECTURE.md` "SIP integration (Phase 2)"):
+**One-time setup** (PJSIP is built from source with its own solution;
+build the platforms and configurations you need):
 
 ```powershell
 git submodule update --init --recursive
 .\scripts\setup-pjproject.ps1
-msbuild third_party\pjproject\pjproject-vs14.sln /t:libpjproject /p:Configuration=Debug-Static /p:Platform=x64 /p:PlatformToolset=v145
 msbuild third_party\pjproject\pjproject-vs14.sln /t:libpjproject /p:Configuration=Release-Static /p:Platform=x64 /p:PlatformToolset=v145
+msbuild third_party\pjproject\pjproject-vs14.sln /t:libpjproject /p:Configuration=Release-Static /p:Platform=Win32 /p:PlatformToolset=v145
 ```
 
-This only needs to be done once (or again after updating the submodule).
-It takes a few minutes — it's building pjlib, pjmedia, pjnath, pjsip,
-pjsua2, and several bundled codec libraries from source into one
-combined `libpjproject-*.lib` per configuration.
+(`Debug-Static` for Debug builds.)
 
-**Then build VoIPModem itself:**
+**Then build VoIPModem** (this also builds libv90modem, which is a
+project in the same solution, and the Manager). Output goes to
+`<Platform>\<Configuration>\` at the repository root, e.g.
+`Win32\Release\VoIPModem.exe` and `Win32\Release\VoIPModemManager.exe`:
 
 ```
-msbuild VoIPModem.sln /p:Configuration=Debug /p:Platform=x64
+msbuild VoIPModem.sln /p:Configuration=Release /p:Platform=x64
+msbuild VoIPModem.sln /p:Configuration=Release /p:Platform=Win32
 ```
 
-Or open `VoIPModem.sln` in Visual Studio and build normally. Only
-`x64` is configured; there is no Win32 configuration.
+Shared build settings (output folders, PJSIP paths and library names) live
+in `build/VoIPModem.props`, which every project imports.
+
+**Windows XP / Server 2003**: the `Debug-XP` and `Release-XP`
+configurations (Win32 for XP, x64 for XP x64 and Server 2003 x64) use the
+`v141_xp` toolset. Current Visual Studio no longer offers it; install
+Visual Studio 2019 or 2022 Build Tools with "C++ Windows XP Support for
+VS 2017 (v141) tools", alongside your main Visual Studio. Then:
+
+```powershell
+.\scripts\build-xp.ps1 -Platform Win32 -Configuration Release-XP
+```
+
+The script finds the installation that has `v141_xp`, builds the separate
+PJSIP checkout `third_party/pjproject-xp`, then the solution, into
+`Win32\Release-XP\`. (`-SkipPjproject` skips PJSIP on later runs.) The
+result needs Windows XP SP3 (or Server 2003) and no runtime
+redistributable: the C runtime is linked statically. Toolset choice per
+configuration is in `build/VoIPModem.Toolset.props`.
 
 ## Run
 
-1. Copy `config/voipmodem.ini.sample` to `voipmodem.ini` (next to the
-   built `VoIPModem.exe`, or anywhere, and pass its path as the first
-   command-line argument). Set `ComPort` to a port you actually have —
-   a com0com virtual pair for development, per `docs/PROJECT_SPEC.md`
-   section 3. One `[Modem]` section runs a single line; replace it with
-   one `[Modem.<name>]` section per line to run several modems at once,
-   each on its own COM port and its own thread (see
-   `docs/ARCHITECTURE.md` "Multiple modem instances").
-2. To actually place/receive calls, set `[SIP] LocalPort` and each
-   instance's `SipServer`/`SipExtension`/`SipPassword` to your own
-   Asterisk details (see `docs/ARCHITECTURE.md` "SIP integration (Phase
-   2)"). Leave `SipServer` empty to keep an instance on the no-op
-   `NullCallController` (`ATD`/`ATA` honestly fail) for pure serial/Hayes
-   testing without a SIP server. **Never commit real credentials** —
-   `voipmodem.ini` itself is gitignored for exactly that reason; only
-   edit your own local copy, not `config/voipmodem.ini.sample`.
-3. Run `VoIPModem.exe [path-to-ini]`.
-4. Open the other side of each COM pair in a terminal emulator and type
-   `AT`, `ATI`, `ATZ`, `ATD<number>`, etc.
-5. Once a call connects, both sides run the real ITU-T V.8 handshake
-   over the call audio (ANSam, CM/JM, CJ) and log the negotiated
-   outcome — each side currently only ever advertises V.21 (the one
-   modulation actually implemented), not a real modem connection yet
-   (see `docs/ARCHITECTURE.md` "Modem DSP (Phase 4)"). A single
-   instance calling a plain phone cannot exercise this meaningfully —
-   a phone never transmits V.8 back — so this needs two VoIPModem
-   instances calling each other to actually negotiate anything.
-6. Stop with Ctrl+C.
+1. Install com0com and create one port pair per line. VoIPModem opens
+   one side; bind Windows' "(Standard Modem Types)" driver to the other
+   side (Device Manager, Add legacy hardware, Modem). See
+   `docs/ARCHITECTURE.md` "Windows integration".
+2. Copy `config/voipmodem.ini.sample` to `voipmodem.ini` next to
+   `VoIPModem.exe` (or pass its path as the first argument). Set each
+   line's `ComPort`, and `[SIP] LocalPort` plus each line's `SipServer`,
+   `SipExtension` and `SipPassword`. **Never commit real credentials**:
+   `voipmodem.ini` is gitignored for that reason.
+3. Run it, either way:
+   - **In a console**: `VoIPModem.exe [path-to-ini]`. Stop with Ctrl+C.
+   - **As a Windows service** (starts with Windows, no one logged on):
+     from an administrator prompt, `VoIPModem.exe --install [path-to-ini]`
+     (default: `voipmodem.ini` next to the exe), then
+     `net start VoIPModem`. `VoIPModem.exe --uninstall` removes it. The
+     Manager's File menu can install, start, stop and restart it too.
+4. Use the line from the modem-driver side: RAS, or a terminal on the
+   paired COM port. `ATDT<extension>` dials; `ATA` or `ATS0=<n>` answers.
+   `CONNECT <rate>` means the modem link is up; after that the port
+   carries data. `+++` (with a second of silence before and after)
+   returns to command mode, and `ATH` hangs up.
+
+**VoIPModem Manager**: start `VoIPModemManager.exe`. It connects to
+127.0.0.1:7880 (File > Connect to service for another computer, port or
+password) and refreshes once a second. Select a line to answer, hang up,
+reset it or take it out of service; Modem > New modem line adds one;
+Tools > Settings edits `voipmodem.ini` (comments are kept) and applies
+the change to idle lines, or asks to restart the service for the SIP
+transport, audio path and control API settings. Tools also has the
+com0com pairs and modem drivers on the service's computer, a loopback
+self-test of the modem engine, the SIP trace, and an AT console for the
+modem side of a pair.
+
+To see what a call is doing, set `[Logging] Level=Debug`: the log then
+has the SIP trace, the modem's connect line (mode, rates, SNR, round
+trip) and the V.42 state.
 
 ## Test
 
@@ -107,9 +145,24 @@ msbuild tests\VoIPModem.Tests.vcxproj /p:Configuration=Debug /p:Platform=x64
 x64\Debug\VoIPModem.Tests.exe
 ```
 
-Tests use a small hand-rolled framework (`tests/TestFramework.h`) rather
-than an external dependency — it covers the Hayes parser, the modem
-state machine (including the async call-event handling SIP needs), and
-config loading with fakes/doubles, not a live SIP server. Testing the
-real `PjsipCallController` against Asterisk is manual (see
-`docs/ROADMAP.md` for what has and hasn't been verified that way).
+A small hand-rolled framework (`tests/TestFramework.h`), no external
+dependency. It covers the Hayes parser, the state machine (with a fake
+call controller), config loading and the ini writer, the control API
+server (over a real loopback socket, password included), the call
+statistics, com0com pairing, and the MSVC build of libv90modem (two
+modems connected back to back). Calls through real SIP, links with real
+modems, and the Manager's window are tested by hand; `docs/ROADMAP.md`
+records what has been.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` builds Debug and Release for x64 and Win32 on
+GitHub's `windows-2022` runner and runs the tests on every push and pull
+request; the Release binaries are kept as artifacts. The runner has Visual Studio
+2022, so CI overrides the projects' `v145` toolset with `v143`. pjproject's
+build is cached by submodule commit, toolset, configuration and
+`config_site.h`. Pushing a `v*` tag runs `release.yml`, which publishes a
+GitHub release with a zip per platform (`win-x64`, `win-x86`), each with
+both programs, the sample config and the licence texts of libv90modem,
+PJSIP and JSON for Modern C++. Dependabot proposes weekly
+updates to the actions and both submodules.

@@ -63,7 +63,14 @@ void CommandLineSession::OnByteReceived(uint8_t byte) {
 }
 
 void CommandLineSession::ProcessLine(const std::string& line) {
-    logger_.Debug("Command line: " + line);
+    if (trace_) {
+        logger_.Info("AT> " + line);
+    } else {
+        logger_.Debug("Command line: " + line);
+    }
+    if (!line.empty()) {
+        ++commandCount_;
+    }
     const AtParseResult parsed = AtCommandParser::Parse(line);
     const ExecutionOutcome outcome = core_.Execute(parsed);
     SendResponse(outcome);
@@ -82,8 +89,11 @@ void CommandLineSession::SendResponse(const ExecutionOutcome& outcome) {
         return;
     }
 
+    if (trace_) {
+        logger_.Info("AT< " + ToVerboseText(outcome.finalResult) + outcome.resultSuffix);
+    }
     if (core_.Profile().verboseResultCodes) {
-        port_.Write(FrameTextLine(ToVerboseText(outcome.finalResult)));
+        port_.Write(FrameTextLine(ToVerboseText(outcome.finalResult) + outcome.resultSuffix));
     } else {
         port_.Write(std::to_string(ToNumericCode(outcome.finalResult)) + "\r\n");
     }
