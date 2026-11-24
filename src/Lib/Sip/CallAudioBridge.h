@@ -59,7 +59,7 @@ public:
     // `enableV34Probing` is accepted for config compatibility and ignored:
     // libv90modem offers V.34 by default.
     CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableV34Probing = false,
-                     bool enableLocalAudio = false, bool alaw = false);
+                     bool enableLocalAudio = false, bool alaw = false, const std::string& modulations = "");
     ~CallAudioBridge() override;
 
     CallAudioBridge(const CallAudioBridge&) = delete;
@@ -100,6 +100,7 @@ private:
     v90m_ec* ec_ = nullptr;
     bool ecActive_ = false; // reset at V90M_EV_CONNECTED; bits flow through it from then on
     int lastEcState_ = -1;
+    std::string modulationsDescription_; // for the start log line
     std::vector<std::int16_t> pendingTxSamples_;
     std::optional<WindowsAudioOutput> localSpeaker_;
 

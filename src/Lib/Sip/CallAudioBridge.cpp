@@ -1,6 +1,7 @@
 #include "CallAudioBridge.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <string>
 
@@ -76,17 +77,53 @@ const char* DescribeCompression(int alg) {
     }
 }
 
+// Parses ModemInstanceConfig::modulations ("V21,V34,..."); 0 if empty or
+// nothing recognised. Unknown names are reported through `unknown`.
+unsigned ParseModulations(const std::string& list, std::string& unknown) {
+    unsigned mask = 0;
+    size_t start = 0;
+    while (start <= list.size()) {
+        const size_t comma = list.find(',', start);
+        std::string item = list.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+        item.erase(0, item.find_first_not_of(" \t"));
+        item.erase(item.find_last_not_of(" \t") + 1);
+        for (auto& ch : item) ch = static_cast<char>(toupper(static_cast<unsigned char>(ch)));
+        if (item == "V21") mask |= V90M_MOD_V21;
+        else if (item == "V22" || item == "V22BIS") mask |= V90M_MOD_V22;
+        else if (item == "V32" || item == "V32BIS") mask |= V90M_MOD_V32BIS;
+        else if (item == "V34") mask |= V90M_MOD_V34;
+        else if (item == "V90") mask |= V90M_MOD_V90;
+        else if (item == "V92") mask |= V90M_MOD_V92 | V90M_MOD_V90; // V.92 requires V.90
+        else if (item == "BELL103") mask |= V90M_MOD_BELL103;
+        else if (item == "BELL212A") mask |= V90M_MOD_BELL212A | V90M_MOD_V22;
+        else if (!item.empty()) unknown += (unknown.empty() ? "" : ",") + item;
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    return mask;
+}
+
 } // namespace
 
 CallAudioBridge::CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableV34Probing, bool enableLocalAudio,
-                                 bool alaw)
+                                 bool alaw, const std::string& modulations)
     : callingParty_(callingParty), logger_(logger) {
     (void)enableV34Probing; // see header
 
     v90m_cfg cfg;
     v90m_cfg_default(&cfg);
     cfg.role = callingParty ? V90M_ROLE_ORIGINATE : V90M_ROLE_ANSWER;
-    cfg.modulations |= V90M_MOD_V92; // falls back to V.90 / lower by itself
+    std::string unknown;
+    const unsigned configured = ParseModulations(modulations, unknown);
+    if (!unknown.empty()) {
+        logger_.Warn("Modulations: ignoring unknown name(s) " + unknown);
+    }
+    if (configured != 0) {
+        cfg.modulations = configured;
+    } else {
+        cfg.modulations |= V90M_MOD_V92; // defaults + V.92; falls back to V.90 / lower by itself
+    }
+    modulationsDescription_ = modulations.empty() ? "defaults+V92" : modulations;
     cfg.alaw = alaw ? 1 : 0;
     cfg.getbit = GetBitCallback;
     cfg.putbit = PutBitCallback;
@@ -140,7 +177,7 @@ void CallAudioBridge::Start(pj::AudioMedia& callAudio) {
 
     logger_.Info(std::string("CallAudioBridge started (") + (callingParty_ ? "calling" : "answering") +
                  "); libv90modem " + v90m_version() +
-                 " offering V.92/V.90/V.34/V.32bis/V.22bis/V.22/V.21 with V.42" +
+                 " offering " + modulationsDescription_ + " with V.42" +
                  (localSpeaker_.has_value() ? "; local audio monitor enabled" : ""));
 }
 

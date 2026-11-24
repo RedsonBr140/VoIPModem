@@ -28,6 +28,7 @@ std::unique_ptr<ICallController> MakeCallController(const ModemInstanceConfig& c
     sipConfig.realm = config.sipRealm;
     sipConfig.enableV34Probing = config.enableV34Probing;
     sipConfig.enableLocalAudio = config.enableLocalAudio;
+    sipConfig.modulations = config.modulations;
 
     auto controller = std::make_unique<PjsipCallController>(*sipEndpoint, std::move(sipConfig), logger);
     if (!controller->Start()) {

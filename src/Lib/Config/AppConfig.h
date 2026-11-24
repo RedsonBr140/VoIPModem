@@ -44,6 +44,12 @@ struct ModemInstanceConfig {
     // single line you want to listen to.
     bool enableLocalAudio = false;
 
+    // Which modulations this line's modem (libv90modem) offers, as a
+    // comma list of V21, V22, V32BIS, V34, V90, V92, BELL103, BELL212A
+    // (ini: `Modulations=`). Empty = libv90modem's defaults plus V.92.
+    // e.g. "V21,V22,V32BIS,V34" keeps a call out of V.90/V.92 PCM.
+    std::string modulations;
+
     // SIP registration for this instance's extension. If sipServer is
     // empty, this instance gets NullCallController instead of real SIP —
     // see ModemInstance and docs/ARCHITECTURE.md "SIP integration (Phase 2)".

@@ -65,6 +65,7 @@ AppConfig LoadAppConfig(const IniConfig& ini) {
         modem.autoAnswerRingCount = ini.GetInt(sectionName, "AutoAnswerRingCount", modem.autoAnswerRingCount);
         modem.enableV34Probing = ini.GetInt(sectionName, "EnableV34Probing", modem.enableV34Probing ? 1 : 0) != 0;
         modem.enableLocalAudio = ini.GetInt(sectionName, "EnableLocalAudio", modem.enableLocalAudio ? 1 : 0) != 0;
+        modem.modulations = ini.GetString(sectionName, "Modulations", modem.modulations);
         modem.sipServer = ini.GetString(sectionName, "SipServer", modem.sipServer);
         modem.sipExtension = ini.GetString(sectionName, "SipExtension", modem.sipExtension);
         modem.sipPassword = ini.GetString(sectionName, "SipPassword", modem.sipPassword);

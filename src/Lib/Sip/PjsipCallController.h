@@ -19,6 +19,7 @@ struct SipAccountConfig {
     std::string realm = "*";
     bool enableV34Probing = false; // see ModemInstanceConfig::enableV34Probing's own comment
     bool enableLocalAudio = false; // see ModemInstanceConfig::enableLocalAudio's own comment
+    std::string modulations;       // see ModemInstanceConfig::modulations's own comment
 };
 
 // Real, PJSIP-backed ICallController: one SIP account (one modem
