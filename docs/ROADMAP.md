@@ -1452,6 +1452,31 @@ effort, not a near-complete one:
   next V.34 architecture once the V.21 milestone above ships** — not
   more gain tuning on the existing Gardner/Costas loops, which has
   already failed twice for related reasons.
+- **First call against a real V.92 modem (2026-11-24).** VoIPModem
+  (ext 1004) dialled a real modem at ext 1003 over Asterisk. Found and
+  fixed, in order:
+  1. PJSIP logs never reached `voipmodem.log`: `consoleLevel = 0` in
+     `PjsipEndpoint` made pjsua drop every message before the writer.
+     Now 5.
+  2. ANSam never detected: the fixed 0.2 threshold was tuned against
+     our own -3 dBm0 generator; the real modem's ANSam arrived at 0.031
+     (~-27 dBm0). Now level floor (0.02) + tone purity + 100 ms
+     duration, so the modem's V.8bis CRe (1375+2002 Hz) can't trigger it.
+  3. JM never received (far end stuck in "V.8: JM"): same cause in
+     `FeedSyncedDemodulator`'s fixed 0.05 gates. Now relative to the
+     received channel level.
+  Result: **V.8 completes against the real modem** (ANSam, CM, JM x2,
+  CJ), but JM selected "none in common" with our V.21-only CM and the
+  far end hung up. Not yet explained: the far end may simply not offer
+  V.21 via V.8, or our CM's V.21 bit may be wrong. Regression tests
+  cover real-level ANSam, CRe rejection, short bursts and a full
+  handshake at 0.05x line gain.
+- **Direction change (2026-11-24): evaluate libv90modem** (georgica,
+  GPL-2.0-only, C99): an existing softmodem library with V.8 through
+  V.90/V.92, V.42/V.42bis/V.44, answering tested against real modems.
+  Per CLAUDE.md's "prefer established protocol libraries", the hand-
+  written `src/Lib/Dsp` path is paused while it's integrated on a
+  branch. User accepted the GPL-2.0 licence consequence.
 
 ## Phase 5 — Windows networking (RAS/PPP) — **not started**
 

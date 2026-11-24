@@ -1,6 +1,8 @@
 #include "V8Handshake.h"
 
+#include <algorithm>
 #include <cmath>
+#include <string>
 
 #include "V8Signal.h"
 
@@ -23,8 +25,38 @@ constexpr float kAnsamAmplitude = 0.6f;
 constexpr double kTeSeconds = 0.5;             // 8.1.1's own stated minimum
 constexpr double kAnswerInitialSilenceSeconds = 0.2; // 8.2's own stated minimum
 constexpr double kAnsamCarrierHz = 2100.0;
-constexpr double kAnsamDetectionThreshold = 0.2;     // well below ANSam's ~0.48-0.72 expected range
-constexpr Sample kSyncAmplitudeThreshold = 0.05f; // "real signal, not silence" edge-sync threshold
+// Call DCE's ANSam detector. Was a single fixed threshold of 0.2 (peak
+// amplitude, full scale 1.0), tuned against this codebase's own hot
+// generator (~0.48-0.72, ~-3 dBm0) -- found live 2026-11-24 against a
+// real V.92 softmodem that this NEVER fires on a real modem: real
+// modems transmit around -9..-13 dBm0 (G.711 peak ~0.15-0.25, and
+// ANSam's +/-20% AM dips lower still), so 5 full seconds of genuine
+// ANSam went unnoticed. Now three conditions, all required:
+// - level: 2100Hz amplitude >= kAnsamMinAmplitude (~-31 dBm0)
+// - purity: 2100Hz must carry most of the frame's energy (Goertzel
+//   amplitude / (sqrt(2)*RMS), ~1.0 for a pure sine). Needed because a
+//   low level threshold alone would trip on V.8bis CRe/MRe, whose
+//   2002Hz component (+1375Hz) leaks into a 20ms 2100Hz bin -- the real
+//   modem sent three CRe bursts right before its ANSam on that call.
+// - duration: sustained for kAnsamRequiredSamples (consecutive frames),
+//   so a brief burst can't trigger it. Short enough that the
+//   once-per-450ms phase-reversal frame can't starve the count.
+constexpr double kAnsamMinAmplitude = 0.02;
+constexpr double kAnsamMinPurity = 0.7;
+constexpr int kAnsamRequiredSamples = 800; // 100ms
+// CM/JM edge-sync gate (FeedSyncedDemodulator). Was a fixed 0.05
+// amplitude for "signal present", the onset search and the competing-
+// ANSam check -- found live 2026-11-24 that a real V.92 modem arrives
+// at ~0.03 (its ANSam measured 0.031), so its JM never crossed the gate
+// and the far end sat in "V.8: JM" until it gave up. Now relative:
+// - kSyncMinAmplitude: floor only to reject silence/idle noise (~-40 dBm0)
+// - kSyncMinPurity: mark+space must carry most of the frame energy
+// - kCompetingMaxRatio: a competing tone (ANSam tail) must be well
+//   below the channel's own level, not below an absolute number
+// - onset: first sample above half the channel's own amplitude
+constexpr float kSyncMinAmplitude = 0.008f;
+constexpr float kSyncMinPurity = 0.5f;
+constexpr float kCompetingMaxRatio = 0.5f;
 
 const std::vector<bool> kCmJmPreamblePattern = [] {
     std::vector<bool> pattern(kV8PreambleOnes, kV8PreambleOnes + 10);
@@ -154,11 +186,25 @@ std::vector<bool> FeedSyncedDemodulator(std::optional<FskDemodulator>& demod, do
         competingMag = static_cast<float>(competingCheck.Magnitude(blockSize));
     }
 
-    if (markMag < kSyncAmplitudeThreshold && spaceMag < kSyncAmplitudeThreshold) {
+    const float channelMag = std::max(markMag, spaceMag);
+    if (channelMag < kSyncMinAmplitude) {
         return {}; // nothing at our own frequencies yet -- still "silence" for sync purposes
     }
 
-    if (competingHz > 0.0 && competingMag >= competingThreshold) {
+    // Purity: for FSK on this channel, mark+space Goertzel amplitudes sum
+    // to roughly the signal's peak amplitude (sqrt(2)*RMS). Rejects frames
+    // dominated by something else at any level (e.g. ANSam at 2100Hz).
+    double energy = 0.0;
+    for (Sample s : rxSamples) {
+        energy += static_cast<double>(s) * s;
+    }
+    const double peakFromRms = std::sqrt(2.0 * energy / static_cast<double>(blockSize));
+    if (peakFromRms <= 0.0 || (markMag + spaceMag) / peakFromRms < kSyncMinPurity) {
+        return {};
+    }
+
+    // `competingThreshold` is a ratio relative to this channel's own level.
+    if (competingHz > 0.0 && competingMag >= competingThreshold * channelMag) {
         return {}; // the previous tone hasn't actually died down yet -- not real sync
     }
 
@@ -168,7 +214,7 @@ std::vector<bool> FeedSyncedDemodulator(std::optional<FskDemodulator>& demod, do
     // just confirms the onset is at or near sample 0).
     size_t startIndex = rxSamples.size();
     for (size_t i = 0; i < rxSamples.size(); ++i) {
-        if (std::fabs(rxSamples[i]) > kSyncAmplitudeThreshold) {
+        if (std::fabs(rxSamples[i]) > 0.5f * channelMag) {
             startIndex = i;
             break;
         }
@@ -240,9 +286,24 @@ void V8Handshake::ProcessCallDceFrame(const std::vector<Sample>& rxSamples, std:
             for (Sample s : rxSamples) {
                 ansamDetector_.Process(s);
             }
-            if (!rxSamples.empty() &&
-                ansamDetector_.Magnitude(static_cast<int>(rxSamples.size())) > kAnsamDetectionThreshold) {
-                logger_.Info("V8Handshake: ANSam detected, entering silent Te period");
+            if (rxSamples.empty()) {
+                return;
+            }
+            double energy = 0.0;
+            for (Sample s : rxSamples) {
+                energy += static_cast<double>(s) * s;
+            }
+            const double rms = std::sqrt(energy / static_cast<double>(rxSamples.size()));
+            const double toneAmplitude = ansamDetector_.Magnitude(static_cast<int>(rxSamples.size()));
+            const double purity = rms > 0.0 ? toneAmplitude / (std::sqrt(2.0) * rms) : 0.0;
+            if (toneAmplitude >= kAnsamMinAmplitude && purity >= kAnsamMinPurity) {
+                ansamSamplesSeen_ += static_cast<int>(rxSamples.size());
+            } else {
+                ansamSamplesSeen_ = 0;
+            }
+            if (ansamSamplesSeen_ >= kAnsamRequiredSamples) {
+                logger_.Info("V8Handshake: ANSam detected (2100Hz amplitude " + std::to_string(toneAmplitude) +
+                             ", purity " + std::to_string(purity) + "), entering silent Te period");
                 state_ = State::SilentTe;
                 silenceSamplesRemaining_ = static_cast<int>(kTeSeconds * kSampleRateHz);
             }
@@ -261,7 +322,7 @@ void V8Handshake::ProcessCallDceFrame(const std::vector<Sample>& rxSamples, std:
             FillFromRepeatingSequence(txSamplesOut, frameSampleCount, pendingCmTx_, cmModulator_, localMenu_);
 
             const auto menu = ReceiveMenu(jmDemodulator_, kChannel2MarkHz, kChannel2SpaceHz, rxSamples, jmBits_,
-                                           jmSearchResumeIndex_, kAnsamCarrierHz, kSyncAmplitudeThreshold);
+                                           jmSearchResumeIndex_, kAnsamCarrierHz, kCompetingMaxRatio);
             if (menu.has_value()) {
                 if (lastJmMenu_.has_value() && MenusEqual(lastJmMenu_.value(), menu.value())) {
                     ++identicalJmCount_;

@@ -166,6 +166,7 @@ private:
 
     // Call DCE state
     AnsamDetector ansamDetector_;
+    int ansamSamplesSeen_ = 0; // consecutive qualifying 2100Hz samples -- see kAnsamRequiredSamples
     int silenceSamplesRemaining_ = 0;
     FskModulator cmModulator_;
     std::deque<Sample> pendingCmTx_;

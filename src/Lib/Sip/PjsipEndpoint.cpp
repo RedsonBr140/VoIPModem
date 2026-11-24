@@ -56,7 +56,10 @@ bool PjsipEndpoint::Start(int localPort) {
         pj::EpConfig epConfig;
         epConfig.logConfig.writer = new LoggerBridge(logger_);
         epConfig.logConfig.level = 5;
-        epConfig.logConfig.consoleLevel = 0; // we route everything through LoggerBridge instead
+        // pjsua only hands a message to logConfig.writer if its level is
+        // <= consoleLevel (the writer IS the "console" here), so this
+        // must match `level` -- 0 silently dropped every PJSIP message.
+        epConfig.logConfig.consoleLevel = 5;
         epConfig.uaConfig.maxCalls = 32;      // generous headroom for several ModemInstance lines
 
         // Match the spec's G.711-at-8kHz target end to end (no resampling
