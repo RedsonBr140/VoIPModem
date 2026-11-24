@@ -21,6 +21,7 @@ namespace voipmodem {
 struct ExecutionOutcome {
     std::vector<std::string> infoLines;
     ResultCode finalResult = ResultCode::OK;
+    std::string resultSuffix; // verbose mode only, e.g. " 31200" -> "CONNECT 31200"
     bool suppressFinalResult = false;
     bool hasResult = true;
 };

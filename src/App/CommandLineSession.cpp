@@ -83,7 +83,7 @@ void CommandLineSession::SendResponse(const ExecutionOutcome& outcome) {
     }
 
     if (core_.Profile().verboseResultCodes) {
-        port_.Write(FrameTextLine(ToVerboseText(outcome.finalResult)));
+        port_.Write(FrameTextLine(ToVerboseText(outcome.finalResult) + outcome.resultSuffix));
     } else {
         port_.Write(std::to_string(ToNumericCode(outcome.finalResult)) + "\r\n");
     }

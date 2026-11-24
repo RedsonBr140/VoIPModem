@@ -71,6 +71,10 @@ public:
     bool enableV34Probing_ = false;
     bool enableLocalAudio_ = false;
     std::string modulations_;
+    // ModemInstance thread only: we already reported NO CARRIER for a
+    // modem that ended and hung up ourselves, so the SIP disconnect that
+    // follows must not report it a second time.
+    bool swallowNextSipEnded_ = false;
 };
 
 class SipCall : public pj::Call {
@@ -88,9 +92,10 @@ public:
             return; // call already torn down underneath us; nothing to report
         }
 
-        if (info.state == PJSIP_INV_STATE_CONFIRMED) {
-            impl_.PushEvent(CallEvent{CallEventType::Connected});
-        } else if (info.state == PJSIP_INV_STATE_DISCONNECTED) {
+        // SIP CONFIRMED is only the phone call being up, not the modem
+        // link: CONNECT is reported once the modem reaches data mode (see
+        // PjsipCallController::PollEvent), as a real modem would.
+        if (info.state == PJSIP_INV_STATE_DISCONNECTED) {
             impl_.PushEvent(CallEvent{CallEventType::Ended, MapSipStatusToResultCode(info.lastStatusCode)});
             impl_.RetireCall(this);
         }
@@ -157,6 +162,9 @@ public:
     }
 
     std::vector<std::uint8_t> DrainRxBytes() { return audioBridge_ ? audioBridge_->DrainRxBytes() : std::vector<std::uint8_t>{}; }
+
+    bool TakeModemConnected(int& rxBps) { return audioBridge_ && audioBridge_->TakeModemConnected(rxBps); }
+    bool TakeModemEnded() { return audioBridge_ && audioBridge_->TakeModemEnded(); }
 
 private:
     PjsipCallController::Impl& impl_;
@@ -324,7 +332,41 @@ void PjsipCallController::HangUp() {
 }
 
 CallEvent PjsipCallController::PollEvent() {
-    return impl_->PopEvent();
+    // Modem-level events first. activeCall_ can be retired by PJSIP's
+    // thread (RetireCall, under mutex_), so look under the lock -- but
+    // hang up outside it: hangup() may call back into RetireCall.
+    int rxBps = 0;
+    bool connected = false;
+    bool ended = false;
+    {
+        std::lock_guard<std::mutex> lock(impl_->mutex_);
+        if (impl_->activeCall_) {
+            connected = impl_->activeCall_->TakeModemConnected(rxBps);
+            if (!connected) {
+                ended = impl_->activeCall_->TakeModemEnded();
+            }
+        }
+    }
+    if (connected) {
+        CallEvent event{CallEventType::Connected};
+        event.connectRateBps = rxBps;
+        return event;
+    }
+    if (ended) {
+        logger_.Info("Modem link ended; hanging up the SIP call");
+        impl_->swallowNextSipEnded_ = true;
+        HangUp();
+        return CallEvent{CallEventType::Ended, ResultCode::NoCarrier};
+    }
+
+    for (;;) {
+        const CallEvent event = impl_->PopEvent();
+        if (event.type == CallEventType::Ended && impl_->swallowNextSipEnded_) {
+            impl_->swallowNextSipEnded_ = false;
+            continue; // already reported when the modem ended
+        }
+        return event;
+    }
 }
 
 void PjsipCallController::SendData(const std::vector<std::uint8_t>& bytes) {

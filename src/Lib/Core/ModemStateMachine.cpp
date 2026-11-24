@@ -209,6 +209,9 @@ ExecutionOutcome ModemStateMachine::HandleCallEvent(const CallEvent& event) {
             hasIncomingCall_ = false;
             state_ = ModemState::OnlineData;
             outcome.finalResult = ResultCode::Connect;
+            if (event.connectRateBps > 0) {
+                outcome.resultSuffix = " " + std::to_string(event.connectRateBps);
+            }
             return outcome;
 
         case CallEventType::Ended:

@@ -46,10 +46,10 @@ namespace voipmodem {
 // between us and the far modem (pjmedia's conference bridge level, PLC,
 // Asterisk transcoding) alters samples.
 //
-// Not done yet: when the modem ends (no answer tone, no common mode,
-// carrier lost, cleardown), this only logs it and reports it through
-// HasModemEnded(); hanging up the SIP call is still left to the far end
-// or ATH.
+// Connect and end are reported to PjsipCallController through
+// TakeModemConnected/TakeModemEnded: CONNECT goes to the DTE only once the
+// modem is in data mode, and when the modem ends (no answer tone, no
+// common mode, carrier lost, cleardown) the SIP call is hung up.
 //
 // If `enableLocalAudio` is true, every frame's RX+TX mix also goes to
 // the PC's default sound output (WindowsAudioOutput), as a modem speaker.
@@ -75,8 +75,11 @@ public:
     // Thread-safe; every byte received from the far end since last call.
     std::vector<std::uint8_t> DrainRxBytes();
 
-    // Thread-safe: the modem stopped (see class comment).
-    bool HasModemEnded() const;
+    // Thread-safe, each true exactly once: the modem reached data mode
+    // (`rxBps` = the rate it receives at), or the modem stopped for good.
+    // PjsipCallController turns these into CONNECT <rate> and a hang-up.
+    bool TakeModemConnected(int& rxBps);
+    bool TakeModemEnded();
 
     // libv90modem's getbit/putbit/on_event, reached through C callbacks
     // in the .cpp; media thread only. Not for other callers.
@@ -104,10 +107,13 @@ private:
     std::vector<std::int16_t> pendingTxSamples_;
     std::optional<WindowsAudioOutput> localSpeaker_;
 
-    mutable std::mutex dataMutex_; // guards the queues and modemEnded_
+    mutable std::mutex dataMutex_; // guards the queues and the pending flags below
     std::deque<std::uint8_t> txByteQueue_;
     std::deque<std::uint8_t> rxByteQueue_;
-    bool modemEnded_ = false;
+    bool connectPending_ = false;
+    int connectRxBps_ = 0;
+    bool endPending_ = false;
+    bool endSignalled_ = false; // sticky: end is reported to the controller at most once
 };
 
 } // namespace voipmodem

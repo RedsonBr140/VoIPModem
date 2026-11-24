@@ -206,8 +206,16 @@ void CallAudioBridge::OnModemEvent(int event) {
                          ", round trip " + std::to_string(stats.rtd) + " samples");
             v90m_ec_cfg ecCfg;
             v90m_ec_cfg_default(&ecCfg, callingParty_ ? 1 : 0);
+            // Deliberately NOT honouring st.odp_bypass (libv90modem's docs
+            // suggest detect = 0 then). With detection on, the answerer
+            // still starts LAPM on a caller's flags/SABME without an ODP
+            // (v42.c, "with or without ODP"), so it serves both kinds of
+            // caller; with it off it serves only one. Found live
+            // 2026-11-24: BinModem calling, V.90 with both ends V.92 and
+            // LAPM in V.8 -> odp_bypass 1, but BinModem ran the detection
+            // phase, never got our ADP, and LAPM never started.
             if (!callingParty_ && st.odp_bypass) {
-                ecCfg.detect = 0; // V.92 9.3.1: both named LAPM in V.8, caller skips ODP
+                logger_.Info("libv90modem: caller may skip V.42 detection (V.92 9.3.1); keeping detection on");
             }
             if (ec_ != nullptr && v90m_ec_reset(ec_, &ecCfg) == V90M_OK) {
                 ecActive_ = true;
@@ -215,6 +223,9 @@ void CallAudioBridge::OnModemEvent(int event) {
             } else {
                 logger_.Error("libv90modem: V.42 endpoint reset failed; no data will flow");
             }
+            std::lock_guard<std::mutex> lock(dataMutex_);
+            connectPending_ = true;
+            connectRxBps_ = st.rx_bps;
             break;
         }
         case V90M_EV_RATES:
@@ -236,7 +247,7 @@ void CallAudioBridge::OnModemEvent(int event) {
                 ecActive_ = false;
             }
             std::lock_guard<std::mutex> lock(dataMutex_);
-            modemEnded_ = true;
+            if (!endSignalled_) { endPending_ = true; endSignalled_ = true; } // once per call
             break;
         }
         default:
@@ -268,6 +279,19 @@ void CallAudioBridge::PumpErrorControl(unsigned elapsedMs) {
         return;
     }
     v90m_ec_tick(ec_, elapsedMs);
+
+    // V.42 gave up for good (no SABME, link failure, peer DISC...) while
+    // the modem is still connected: no data can flow any more, so end
+    // the call rather than hold a dead line open.
+    if (v90m_ec_state(ec_) == V90M_EC_DISCONNECTED) {
+        LogErrorControlState();
+        logger_.Info("libv90modem: V.42 link is gone; clearing down");
+        ecActive_ = false;
+        v90m_cleardown(modem_);
+        std::lock_guard<std::mutex> lock(dataMutex_);
+        if (!endSignalled_) { endPending_ = true; endSignalled_ = true; } // once per call
+        return;
+    }
 
     {
         std::lock_guard<std::mutex> lock(dataMutex_);
@@ -349,9 +373,23 @@ std::vector<std::uint8_t> CallAudioBridge::DrainRxBytes() {
     return result;
 }
 
-bool CallAudioBridge::HasModemEnded() const {
+bool CallAudioBridge::TakeModemConnected(int& rxBps) {
     std::lock_guard<std::mutex> lock(dataMutex_);
-    return modemEnded_;
+    if (!connectPending_) {
+        return false;
+    }
+    connectPending_ = false;
+    rxBps = connectRxBps_;
+    return true;
+}
+
+bool CallAudioBridge::TakeModemEnded() {
+    std::lock_guard<std::mutex> lock(dataMutex_);
+    if (!endPending_) {
+        return false;
+    }
+    endPending_ = false;
+    return true;
 }
 
 } // namespace voipmodem

@@ -19,13 +19,14 @@ namespace voipmodem {
 enum class CallEventType {
     None,         // nothing pending
     IncomingCall, // a new call is alerting; caller should start a RING cadence
-    Connected,    // the call (incoming or outgoing) is now up
+    Connected,    // the modem link (not just the phone call) is up: data can flow
     Ended         // the call finished; `result` is the modem result code to report
 };
 
 struct CallEvent {
     CallEventType type = CallEventType::None;
     ResultCode result = ResultCode::NoCarrier; // meaningful only when type == Ended
+    int connectRateBps = 0;                    // Connected: the rate this modem receives at; 0 = unknown
 };
 
 // Seam between the modem core and the telephony backend. Phase 1 shipped
