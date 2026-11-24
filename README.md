@@ -22,6 +22,18 @@ Two programs:
   and edit lines and settings. It talks only to the API, so the service
   runs without it, and it can manage a service on another computer.
 
+![VoIPModem Manager on Windows XP, the service running as a Windows service, line 2 in a V.90 56000/26400 call](docs/images/manager-xp-v90-call.png)
+
+*VoIPModem Manager on Windows XP. The service runs as a Windows service
+with four lines; line 2 is in a live V.90 call at 56000/26400.*
+
+| | |
+|---|---|
+| ![Settings, Modem defaults tab](docs/images/settings-modem-defaults.png) | ![Add modem line](docs/images/new-line.png) |
+| Settings are written into `voipmodem.ini`, comments kept, and applied to idle lines. | New lines are offered a free com0com port; a line the service refuses keeps what you typed. |
+| ![Ports and modem drivers](docs/images/ports-drivers.png) | ![Loopback self-test](docs/images/selftest.png) |
+| The service computer's com0com pairs and which Windows modem driver each line reaches. | A self-test that connects two of the service's modems to each other. |
+
 Docs:
 
 - `docs/PROJECT_SPEC.md`: requirements and goals.
@@ -39,9 +51,9 @@ V.42 LAPM and V.44 compression; calling, at **V.34 31200/14400** and V.21.
 Those tests used a SIP software modem (BinModem) as the far end. A
 physical analog modem through the FXS gateway has not been tried yet,
 and V.92 does not connect yet. RAS/PPP (Phase 5) is not started. The
-service mode, control API and Manager are new: built and tested here
-(unit tests, the API end to end, the Manager driven against a running
-service), not yet through a live modem call. Details in `docs/ROADMAP.md`.
+service mode, control API and Manager have been run on Windows XP as a
+Windows service, with a live V.90 call watched in the Manager (the
+screenshot above). Details in `docs/ROADMAP.md`.
 
 ## Licence
 

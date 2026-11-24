@@ -215,9 +215,15 @@ after `docs/design` (a mock-up in the Windows Server 2003 style).
   (main window, settings, line properties, new line, ports and drivers,
   self-test passing at V.34, about). XP Win32 build of both programs:
   101 tests pass, PE 5.01, no import newer than XP SP3.
-- **Not yet verified**: a live modem call watched and controlled from the
-  Manager; running as a service (install, start, stop) on XP or Server
-  2003; the Manager against a service on another computer.
+- **Verified live on Windows XP** (2026-11-24, `docs/images/manager-xp-v90-call.png`):
+  VoIPModem running as a Windows service with four lines, all registered
+  with Asterisk, watched in the Manager on the same machine; an incoming
+  call on one line connected at **V.90 56000/26400** with V.42/V.44, and
+  the Manager showed it live (state, caller, rates, duration, data,
+  retrains, errors, statistics, carrier mix, jitter and loss, RTP rate).
+- **Not yet verified**: controlling a live call from the Manager (hang up,
+  out of service mid-call); Server 2003; the Manager against a service on
+  another computer.
 
 ## Recommended next step
 
