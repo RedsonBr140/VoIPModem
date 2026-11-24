@@ -56,10 +56,9 @@ namespace voipmodem {
 class CallAudioBridge : public pj::AudioMediaPort {
 public:
     // `alaw`: the call's negotiated codec is PCMA (else PCMU).
-    // `enableV34Probing` is accepted for config compatibility and ignored:
-    // libv90modem offers V.34 by default.
-    CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableV34Probing = false,
-                     bool enableLocalAudio = false, bool alaw = false, const std::string& modulations = "");
+    // `modulations`: ModemInstanceConfig::modulations; empty = defaults.
+    CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableLocalAudio = false, bool alaw = false,
+                    const std::string& modulations = "");
     ~CallAudioBridge() override;
 
     CallAudioBridge(const CallAudioBridge&) = delete;

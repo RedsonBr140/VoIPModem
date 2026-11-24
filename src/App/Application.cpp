@@ -29,7 +29,7 @@ Application::Application(std::string configPath)
 
 int Application::Run() {
     logger_.Init(config_.logLevel, config_.logFilePath);
-    logger_.Info("VoIPModem starting (Phase 2: Hayes command skeleton + SIP call control)");
+    logger_.Info("VoIPModem starting (Hayes modem lines over SIP; modem engine: libv90modem)");
 
     if (config_.sipLocalPort > 0) {
         auto endpoint = std::make_unique<PjsipEndpoint>(logger_);

@@ -32,20 +32,20 @@ TEST(LegacySingleModemSection_YieldsOneUnnamedInstance) {
     EXPECT_EQ(config.modems[0].modemIdentification, std::string("Legacy Modem"));
 }
 
-TEST(EnableV34Probing_DefaultsToFalse) {
+TEST(Modulations_DefaultsToEmpty) {
     IniConfig ini;
     ini.LoadFromString("[Modem]\nComPort=COM3\n");
 
     const AppConfig config = LoadAppConfig(ini);
-    EXPECT_TRUE(!config.modems[0].enableV34Probing);
+    EXPECT_EQ(config.modems[0].modulations, std::string());
 }
 
-TEST(EnableV34Probing_ParsesExplicitTrue) {
+TEST(Modulations_ParsesTheList) {
     IniConfig ini;
-    ini.LoadFromString("[Modem]\nEnableV34Probing=1\n");
+    ini.LoadFromString("[Modem]\nModulations=V21,V22,V32BIS,V34\n");
 
     const AppConfig config = LoadAppConfig(ini);
-    EXPECT_TRUE(config.modems[0].enableV34Probing);
+    EXPECT_EQ(config.modems[0].modulations, std::string("V21,V22,V32BIS,V34"));
 }
 
 TEST(EnableLocalAudio_DefaultsToFalse) {

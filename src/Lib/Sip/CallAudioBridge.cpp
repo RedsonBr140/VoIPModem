@@ -105,11 +105,9 @@ unsigned ParseModulations(const std::string& list, std::string& unknown) {
 
 } // namespace
 
-CallAudioBridge::CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableV34Probing, bool enableLocalAudio,
-                                 bool alaw, const std::string& modulations)
+CallAudioBridge::CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableLocalAudio, bool alaw,
+                                 const std::string& modulations)
     : callingParty_(callingParty), logger_(logger) {
-    (void)enableV34Probing; // see header
-
     v90m_cfg cfg;
     v90m_cfg_default(&cfg);
     cfg.role = callingParty ? V90M_ROLE_ORIGINATE : V90M_ROLE_ANSWER;

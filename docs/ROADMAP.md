@@ -137,7 +137,6 @@ Problems these calls found, each fixed before the next:
   tested deliberately.
 - **Call-audio recording** (both directions, our side) for diagnosis and
   for replay through `v90m-replay`.
-- **Remove the unused DSP classes** left in `src/Lib/Dsp` and their tests.
 
 ## Phase 5 — Windows networking (RAS/PPP) — not started
 

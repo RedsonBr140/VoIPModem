@@ -40,7 +40,7 @@ src/
     Serial/                Serial port abstraction + Win32 implementation
     Sip/                   PjsipEndpoint, PjsipCallController, CallAudioBridge (the modem)
     Audio/                 WindowsAudioOutput: optional local "modem speaker"
-    Dsp/                   Tone/DTMF generators for the local speaker's dial sounds
+    Dsp/                   Dial tone/DTMF generators for the local speaker (+ a Goertzel detector their tests use)
     Config/                INI loading, AppConfig (one ModemInstanceConfig per line)
     Logging/               Leveled logger + TaggedLogger (per-line prefix)
   App/                     VoIPModem (executable)
@@ -58,9 +58,8 @@ scripts/
   setup-pjproject.ps1      One-time setup: init the pjproject submodule + place config_site.h
 ```
 
-`src/Lib/Dsp` also still holds earlier, unused DSP classes (V.8, FSK,
-V.34 primitives) and their tests; nothing in the application uses them,
-and they are due to be removed.
+All modem signal processing is libv90modem's; VoIPModem has no DSP of
+its own beyond those local-speaker sounds.
 
 ## Dependency direction
 
