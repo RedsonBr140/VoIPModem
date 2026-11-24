@@ -11,7 +11,7 @@ just coded. `ARCHITECTURE.md` describes how each part works.
 | 3. RTP audio | **Complete**, verified live; media path retuned for modems in Phase 4 |
 | 4. Modem interoperability | **In progress**: real data links at up to V.90 with a SIP softmodem; physical analog modem not yet tested |
 | 5. Windows networking (RAS/PPP) | Not started |
-| 6. Compatibility and optimization | **Started**: x64 + Win32 builds; XP Win32 build done, not yet run on XP |
+| 6. Compatibility and optimization | **Started**: x64 + Win32 builds; XP Win32 build runs on 32-bit XP (V.34 call live); XP x64 / Server 2003 not yet built |
 
 ## Phase 1 — Serial modem skeleton — complete
 
@@ -176,9 +176,14 @@ versions) per Windows generation where needed.
     imports only KERNEL32, WS2_32, ole32 and WINMM, whose one post-XP-RTM
     function (`GetLogicalProcessorInformation`, from the C runtime) exists
     from XP SP3. So: **needs XP SP3**, no redistributable.
-- **Next**: run it on the XP VM (tests, then registration, a call,
-  connect, data), then the x64 XP build (XP x64 / Server 2003 x64), then
-  CI, if GitHub's runner image has `v141_xp`.
+  - **Verified live on 32-bit Windows XP** (VM, 2026-11-24): PJSIP
+    started, the COM port opened, the line registered with Asterisk, and a
+    modem call connected at **V.34**.
+  - Seen on XP: PJSIP logs "Unsupported transport" when an INVITE is 1300
+    bytes or more. It switches such requests to TCP, which VoIPModem does
+    not open, then falls back to UDP. Harmless, but noisy.
+- **Next**: the x64 XP build (XP x64 / Server 2003 x64, untested so far),
+  Server 2003 itself, then CI, if GitHub's runner image has `v141_xp`.
 
 ## Recommended next step
 
