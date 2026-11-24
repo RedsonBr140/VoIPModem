@@ -62,6 +62,20 @@ msbuild VoIPModem.sln /p:Configuration=Release /p:Platform=Win32
 Shared build settings (output folders, PJSIP paths and library names) live
 in `build/VoIPModem.props`, which every project imports.
 
+**Windows XP / Server 2003** (work in progress, not yet run on XP): the
+`Debug-XP` and `Release-XP` configurations (Win32 for XP, x64 for XP x64
+and 2003 x64) use the `v141_xp` toolset, which needs Visual Studio's
+"C++ Windows XP Support for VS 2017 (v141) tools" component. They link a
+separate PJSIP checkout, `third_party/pjproject-xp`, built with:
+
+```
+msbuild third_party\pjproject-xp\pjproject-vs14.sln /t:libpjproject /p:Configuration=Release-Static /p:Platform=Win32 /p:PlatformToolset=v141_xp
+msbuild VoIPModem.sln /p:Configuration=Release-XP /p:Platform=Win32
+```
+
+Output goes to `Win32\Release-XP\`. Toolset selection per configuration is
+in `build/VoIPModem.Toolset.props`.
+
 ## Run
 
 1. Install com0com and create one port pair per line. VoIPModem opens

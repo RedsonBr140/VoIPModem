@@ -3,11 +3,28 @@
   MSVC build of the third_party/libv90modem submodule (GPL-2.0-only,
   C99 softmodem library). Upstream only ships a GNU Makefile; this
   mirrors its LIB_SRC list (api/v90modem.c, modem/ v90/ v34/ v32/ v92/,
-  and the six v42/ sources) and include paths. Compiled as C11 (MSVC
-  has no C99 mode; the sources are C99-clean under it).
+  and the six v42/ sources) and include paths. Compiled as C11 in the
+  modern configurations (MSVC has no C99 mode; the sources are C99-clean
+  under it), and in MSVC's default C mode for the -XP configurations.
 -->
 <Project DefaultTargets="Build" ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug-XP|Win32">
+      <Configuration>Debug-XP</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release-XP|Win32">
+      <Configuration>Release-XP</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug-XP|x64">
+      <Configuration>Debug-XP</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release-XP|x64">
+      <Configuration>Release-XP</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="Debug|x64">
       <Configuration>Debug</Configuration>
       <Platform>x64</Platform>
@@ -33,11 +50,11 @@
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <Import Project="..\..\build\VoIPModem.Toolset.props" />
   <PropertyGroup Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
-    <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
-    <UseDebugLibraries Condition="'$(Configuration)'=='Release'">false</UseDebugLibraries>
-    <PlatformToolset>v145</PlatformToolset>
+    <UseDebugLibraries Condition="'$(VoIPModemDebug)'=='true'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(VoIPModemDebug)'!='true'">false</UseDebugLibraries>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -48,7 +65,10 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <CompileAs>CompileAsC</CompileAs>
-      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <!-- v141_xp has no C standard switch: MSVC 2017's default C mode, which
+           covers the C99 libv90modem uses (mixed declarations, stdint,
+           designated initialisers, //). -->
+      <LanguageStandard_C Condition="'$(VoIPModemXP)'!='true'">stdc11</LanguageStandard_C>
       <WarningLevel>Level3</WarningLevel>
       <!-- C4068: upstream's '#pragma GCC'; C4334: constant (1 << n) compared to int64, intended -->
       <DisableSpecificWarnings>4068;4334;%(DisableSpecificWarnings)</DisableSpecificWarnings>
@@ -56,14 +76,14 @@
       <Optimization>MaxSpeed</Optimization>
     </ClCompile>
   </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+  <ItemDefinitionGroup Condition="'$(VoIPModemDebug)'=='true'">
     <ClCompile>
       <!-- DSP in real time on PJSIP's media thread: optimise even in Debug -->
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
   </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+  <ItemDefinitionGroup Condition="'$(VoIPModemDebug)'!='true'">
     <ClCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>

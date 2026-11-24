@@ -11,7 +11,8 @@
     static library by CPU, platform and configuration only
     (libpjproject-<cpu>-<platform>-vc14-<config>-Static.lib, "vc14" fixed
     whatever the toolset), so a build for another Windows target must come
-    from a separate pjproject tree: set PjRoot for it.
+    from a separate pjproject tree: the XP configurations use
+    third_party\pjproject-xp (see VoIPModem.Toolset.props).
 -->
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
@@ -19,10 +20,19 @@
     <OutDir>$(VoIPModemRoot)$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
 
+    <PjRoot Condition="'$(PjRoot)'=='' and '$(VoIPModemXP)'=='true'">$(VoIPModemRoot)third_party\pjproject-xp\</PjRoot>
     <PjRoot Condition="'$(PjRoot)'==''">$(VoIPModemRoot)third_party\pjproject\</PjRoot>
     <PjCpu Condition="'$(Platform)'=='x64'">x86_64</PjCpu>
     <PjCpu Condition="'$(Platform)'=='Win32'">i386</PjCpu>
-    <PjLib>libpjproject-$(PjCpu)-$(Platform)-vc14-$(Configuration)-Static.lib</PjLib>
+    <PjConfig Condition="'$(VoIPModemDebug)'=='true'">Debug-Static</PjConfig>
+    <PjConfig Condition="'$(VoIPModemDebug)'!='true'">Release-Static</PjConfig>
+    <PjLib>libpjproject-$(PjCpu)-$(Platform)-vc14-$(PjConfig).lib</PjLib>
+
+    <!-- XP is NT 5.1 (32-bit only); XP x64 and Server 2003 are NT 5.2. -->
+    <XpWinNT Condition="'$(Platform)'=='Win32'">0x0501</XpWinNT>
+    <XpWinNT Condition="'$(Platform)'=='x64'">0x0502</XpWinNT>
+    <XpSubsystem Condition="'$(Platform)'=='Win32'">5.01</XpSubsystem>
+    <XpSubsystem Condition="'$(Platform)'=='x64'">5.02</XpSubsystem>
     <PjIncludes>$(PjRoot)pjlib\include;$(PjRoot)pjlib-util\include;$(PjRoot)pjmedia\include;$(PjRoot)pjnath\include;$(PjRoot)pjsip\include</PjIncludes>
   </PropertyGroup>
 
@@ -31,6 +41,17 @@
     <Link>
       <AdditionalLibraryDirectories>$(PjRoot)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>$(PjLib);ws2_32.lib;wsock32.lib;ole32.lib;dsound.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <!-- XP / Server 2003: no Vista+ APIs at compile time, and an .exe header
+       that those systems will load. -->
+  <ItemDefinitionGroup Condition="'$(VoIPModemXP)'=='true'">
+    <ClCompile>
+      <PreprocessorDefinitions>_WIN32_WINNT=$(XpWinNT);WINVER=$(XpWinNT);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <MinimumRequiredVersion>$(XpSubsystem)</MinimumRequiredVersion>
     </Link>
   </ItemDefinitionGroup>
 </Project>
