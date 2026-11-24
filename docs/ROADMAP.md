@@ -1346,9 +1346,9 @@ effort, not a near-complete one:
   `ModemInstance::RunLoop` now branches on `ModemState::OnlineData`:
   serial bytes go to `SendData` instead of `CommandLineSession`, and
   `PollReceivedData` drains straight back out to the serial port every
-  loop iteration. There is deliberately no `+++` escape sequence back
-  to command mode yet -- the only way out of data mode is the call
-  ending (`ATH`, or the far end hanging up).
+  loop iteration. (Originally shipped with no `+++` escape sequence at
+  all -- see the "Two real findings from live testing" entry below for
+  why that turned out to be a real, not cosmetic, gap, and the fix.)
   **Known, deliberate simplification**: `ModemState::OnlineData` (and
   the Hayes `CONNECT` it causes) is still driven purely by SIP media
   confirmation (unchanged from Phase 2), not by `V8Handshake` actually
@@ -1365,10 +1365,68 @@ effort, not a near-complete one:
   tests still pass (0 build warnings); no new unit tests were added,
   consistent with this codebase's existing practice of verifying
   `CallAudioBridge`/`ModemInstance` live rather than in isolation (both
-  require a real PJSIP media subsystem to even construct). **Not yet
-  live-tested** -- that is the next step before this milestone can be
-  called done, per CLAUDE.md's rule against claiming a standard/feature
-  works without an actual interoperability test.
+  require a real PJSIP media subsystem to even construct).
+  **Live-tested 2026-11-23 and confirmed working.** Both `[Modem.Line1]`
+  (COM4/ext 1004) and `[Modem.Line2]` (COM6/ext 1003) run in one
+  `VoIPModem.exe` process against the real Asterisk test server
+  (10.174.7.172:5060); a script driving the com0com peer ports (COM3,
+  COM5) with raw AT commands dialed `ATDT1003` from line1, answered
+  `ATA` on line2, both sides reached real Hayes `CONNECT`, and typed
+  bytes sent after `CONNECT` arrived at the far end's serial port
+  through the real V.8 -> V.21 negotiation -> FSK modulation -> RTP ->
+  FSK demodulation path -- not a stub, not a loopback. Line2->line1
+  arrived byte-for-byte intact. Line1->line2 arrived missing its very
+  first character (the decoder's own async-framing resync logic, see
+  `RunDataLink`, silently ate one bit while locking onto the fresh
+  byte stream and recovered cleanly for the rest of the message) --
+  a real, minor framing-resync rough edge, not a fabricated success;
+  logged as a known issue below rather than smoothed over.
+  **Second finding from the same session, also real**: there is
+  currently no way to end a data-mode call from the serial side at all
+  if the far end doesn't hang up first -- not a new bug, this is the
+  "no `+++` escape sequence yet" limitation already documented above,
+  but live testing is what actually demonstrated its consequence: a
+  second dial attempt from line1 to line2 while line2's previous call
+  was still (invisibly, from the serial port's point of view) active
+  never even reached RING, because line2's modem instance was still
+  mid-call. There is genuinely no way to send `ATH` at all once
+  `ModemState::OnlineData` is reached -- every serial byte, `+++`
+  included, goes straight to `SendData` as data (see
+  `ModemInstance::RunLoop`'s `OnlineData` branch); the only way out is
+  the far end hanging up. The test script's own `+++`/`ATH` cleanup
+  attempt silently did nothing, which is exactly how this was
+  confirmed live rather than just reasoned about. Clearing a stuck
+  call today requires restarting the process. Confirms `+++` support
+  is a real, not cosmetic, next-step gap for Phase 4.
+  **Both findings fixed, same day.** (1) `FskDemodulator`'s early-late
+  timing PI loop now only trusts a bit that differs from the one before
+  it -- a steady run (e.g. the continuous mark "idle" tone between
+  bytes) carries no genuine edge-timing information, and feeding it in
+  anyway let `estimatedRateErrorSamplesPerBit_` drift to a real bias
+  over a long idle gap, which is what corrupted the first byte after
+  one. (2) Added a real Hayes "+++" escape sequence: `ModemInstance`
+  now holds back `+` bytes in `OnlineData` via a small state machine
+  (`EscapeDetectState`) that requires genuine silence (1s) before the
+  first `+`, three `+` typed within that guard time of each other, then
+  silence again before committing -- otherwise the held bytes are sent
+  through as ordinary data, exactly like a real modem. A confirmed
+  escape calls the new `ModemStateMachine::EnterCommandModeFromOnlineData()`,
+  which only flips the state back to `CommandMode`; the call and its
+  data link are untouched, so `ATH` now actually works from a stuck
+  data-mode session. All 227 tests still pass, 0 build warnings.
+  **Re-verifying both fixes live hit an unrelated blocker**: the shared
+  Asterisk test server (10.174.7.172) started leaving extension 1003's
+  dial attempts hanging indefinitely (no RING, no BUSY, no SIP timeout
+  at all, even from a freshly restarted `VoIPModem.exe` with no
+  in-process state carried over) partway through this session's
+  testing -- almost certainly fallout from this session's own earlier
+  `Stop-Process -Force` kills of a mid-call process (before today's
+  `+++`/`ATH` fix existed, that was the only way to clear a stuck data
+  -mode call), which never gave PJSIP the chance to send a proper BYE/
+  CANCEL. Both fixes are implemented and unit-tested but **not yet
+  re-verified live** -- needs either the test server's channel state
+  clearing (likely needs Asterisk-side access this session doesn't
+  have) or a retry once it recovers on its own.
 - **Architectural reference found for V.34's still-open acquisition
   gap, independent of the above: BinModem (github.com/CasualArclamp/
   BinModem, GPL-3.0, Rust) — read for architecture only, same as

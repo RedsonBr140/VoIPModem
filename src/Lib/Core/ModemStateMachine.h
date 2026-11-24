@@ -58,6 +58,14 @@ public:
     // like any other hardware factory default, not back to this value.
     void InitializeAutoAnswerRegister(int rings) { registers_.Set(0, static_cast<uint8_t>(rings)); }
 
+    // Drops back to CommandMode from an active OnlineData call without
+    // touching the call itself (ICallController is never told) -- the
+    // Hayes "+++" escape sequence's actual job. ModemInstance owns the
+    // guard-time timing that decides when a real escape has happened;
+    // this just performs the state transition once it has. No-op if not
+    // currently in OnlineData.
+    void EnterCommandModeFromOnlineData();
+
     ModemState CurrentState() const { return state_; }
     const ModemProfile& Profile() const { return profile_; }
     const SRegisters& Registers() const { return registers_; }

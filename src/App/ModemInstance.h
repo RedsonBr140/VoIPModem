@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -59,11 +60,30 @@ private:
     // Online-data-mode byte passthrough (see docs/ROADMAP.md Phase 4's
     // V.21 data-mode milestone): drains whatever the active call's
     // modem link has actually decoded since the last iteration and
-    // writes it straight to the serial port. The other direction
-    // (serial -> call) is simpler and handled inline in RunLoop(), not
-    // a separate method, since it only needs the one byte RunLoop just
-    // read.
+    // writes it straight to the serial port.
     void PumpOnlineDataRx();
+
+    // Routes one serial byte received while ModemState::OnlineData is
+    // active: either forwards it to the call as data, or holds it back
+    // because it might be the start of a real "+++" escape sequence (see
+    // the class comment below and docs/ROADMAP.md Phase 4). Replaces a
+    // plain unconditional SendData() call once the escape sequence was
+    // added -- see EscapeDetectState's own comment for why this needs to
+    // be a small state machine rather than a single byte check.
+    void HandleOnlineDataByte(std::uint8_t byte);
+
+    // Sends `count` held-back '+' bytes to the call as ordinary data --
+    // called whenever a would-be escape attempt turns out not to be one
+    // (wrong timing), since those bytes were genuinely meant for the far
+    // end and were only ever delayed, never consumed.
+    void FlushHeldPluses(int count);
+
+    // Checks whether an in-progress escape attempt has now been silent
+    // for the full guard time after its third '+', the other half of
+    // the Hayes "+++" timing rule HandleOnlineDataByte() can't check by
+    // itself (it only runs when a byte actually arrives). Called every
+    // RunLoop iteration, same pattern as the other Pump* methods.
+    void PumpEscapeSequenceTimeout();
 
     // Plays a dial tone followed by each digit of `number` as a DTMF
     // tone, purely a local cosmetic cue for a human listening via
@@ -99,6 +119,26 @@ private:
     std::optional<WindowsAudioOutput> dialAudio_;
     std::thread dialAudioThread_;
     ModemState lastObservedState_ = ModemState::CommandMode;
+
+    // Hayes "+++" escape-sequence detection (added 2026-11-23 after live
+    // testing found there was genuinely no way to send ATH once
+    // ModemState::OnlineData was reached -- see docs/ROADMAP.md Phase
+    // 4). Real Hayes modems require: silence for a guard time, exactly
+    // three '+' characters typed with no gap longer than the guard time
+    // between them, then silence for the guard time again -- only then
+    // is it a real escape and not, say, the literal text "+++" arriving
+    // as data mid-stream. `escapeState_` tracks how many of those '+'
+    // have been seen so far; while in any non-Idle state, those '+'
+    // bytes are held back (not yet sent as data) because they might
+    // still turn out to be real data, not an escape -- see
+    // HandleOnlineDataByte()/FlushHeldPluses(). Reset to Idle on the
+    // instant CurrentState() isn't OnlineData, so stale state never
+    // survives into the next call.
+    enum class EscapeDetectState { Idle, SawPlus1, SawPlus2, SawPlus3PendingSilence };
+    EscapeDetectState escapeState_ = EscapeDetectState::Idle;
+    std::chrono::steady_clock::time_point lastOnlineDataByteAt_{};
+    std::chrono::steady_clock::time_point thirdPlusAt_{};
+    static constexpr std::chrono::milliseconds kEscapeGuardTime{1000};
 };
 
 } // namespace voipmodem

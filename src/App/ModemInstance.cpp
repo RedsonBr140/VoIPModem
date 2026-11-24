@@ -86,14 +86,12 @@ void ModemInstance::RunLoop() {
             // Online data mode (see docs/ROADMAP.md Phase 4's V.21
             // milestone): bytes typed into the serial port go straight
             // to the active call's modem link instead of being parsed
-            // as an AT command. There is deliberately no +++ escape
-            // sequence back to command mode yet -- the only way out is
-            // the call ending (ATH, or the far end hanging up); see
-            // ModemState.h's own notes on what Phase 4 does and does
-            // not implement.
+            // as an AT command, except for a genuine "+++" escape
+            // sequence (see HandleOnlineDataByte()/EscapeDetectState).
             if (core_.CurrentState() == ModemState::OnlineData) {
-                callController_->SendData(std::vector<uint8_t>{byte});
+                HandleOnlineDataByte(byte);
             } else {
+                escapeState_ = EscapeDetectState::Idle; // stale state must never survive into the next call
                 session_.OnByteReceived(byte);
             }
         }
@@ -101,6 +99,7 @@ void ModemInstance::RunLoop() {
         // port's read timeout when nothing arrived; IsOpen() is what
         // detects an actually closed/failed port.
 
+        PumpEscapeSequenceTimeout();
         PumpOnlineDataRx();
         PollCallEvents();
         PumpIncomingCallRinging();
@@ -116,6 +115,83 @@ void ModemInstance::PumpOnlineDataRx() {
     if (!received.empty()) {
         serialPort_.Write(received);
     }
+}
+
+void ModemInstance::HandleOnlineDataByte(std::uint8_t byte) {
+    const auto now = std::chrono::steady_clock::now();
+    const bool precededBySilence =
+        lastOnlineDataByteAt_ == std::chrono::steady_clock::time_point{} ||
+        (now - lastOnlineDataByteAt_) >= kEscapeGuardTime;
+
+    switch (escapeState_) {
+        case EscapeDetectState::Idle:
+            if (byte == '+' && precededBySilence) {
+                escapeState_ = EscapeDetectState::SawPlus1;
+                lastOnlineDataByteAt_ = now;
+                return; // held back -- might be the start of a real escape
+            }
+            break;
+
+        case EscapeDetectState::SawPlus1:
+            if (byte == '+' && !precededBySilence) {
+                escapeState_ = EscapeDetectState::SawPlus2;
+                lastOnlineDataByteAt_ = now;
+                return;
+            }
+            FlushHeldPluses(1);
+            escapeState_ = EscapeDetectState::Idle;
+            break;
+
+        case EscapeDetectState::SawPlus2:
+            if (byte == '+' && !precededBySilence) {
+                escapeState_ = EscapeDetectState::SawPlus3PendingSilence;
+                thirdPlusAt_ = now;
+                lastOnlineDataByteAt_ = now;
+                return; // now waiting for post-guard silence; see PumpEscapeSequenceTimeout()
+            }
+            FlushHeldPluses(2);
+            escapeState_ = EscapeDetectState::Idle;
+            break;
+
+        case EscapeDetectState::SawPlus3PendingSilence:
+            // A real escape needs silence after the third '+' too; this
+            // byte arriving too soon means it wasn't one after all.
+            FlushHeldPluses(3);
+            escapeState_ = EscapeDetectState::Idle;
+            break;
+    }
+
+    lastOnlineDataByteAt_ = now;
+    callController_->SendData(std::vector<uint8_t>{byte});
+}
+
+void ModemInstance::FlushHeldPluses(int count) {
+    callController_->SendData(std::vector<uint8_t>(static_cast<size_t>(count), static_cast<uint8_t>('+')));
+}
+
+void ModemInstance::PumpEscapeSequenceTimeout() {
+    if (core_.CurrentState() != ModemState::OnlineData) {
+        escapeState_ = EscapeDetectState::Idle;
+        return;
+    }
+    if (escapeState_ != EscapeDetectState::SawPlus3PendingSilence) {
+        return;
+    }
+    if (std::chrono::steady_clock::now() - thirdPlusAt_ < kEscapeGuardTime) {
+        return; // still within the guard window; a byte might yet arrive and disqualify it
+    }
+
+    // Guard time held both before the first '+' and after the third:
+    // a real escape. The "+++" itself is never sent to the far end, same
+    // as a real modem -- only the state transition happens here, the
+    // call and its data link stay up untouched.
+    escapeState_ = EscapeDetectState::Idle;
+    core_.EnterCommandModeFromOnlineData();
+    logger_.Info("+++ escape sequence detected; back to command mode (call still up)");
+    ExecutionOutcome outcome;
+    outcome.suppressFinalResult = core_.Profile().quietMode;
+    outcome.finalResult = ResultCode::OK;
+    session_.SendUnsolicited(outcome);
 }
 
 void ModemInstance::PollCallEvents() {

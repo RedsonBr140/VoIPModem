@@ -113,6 +113,26 @@ private:
     // average bit length itself, so sustained drift gets tracked out
     // rather than just permanently fought bit-by-bit.
     double estimatedRateErrorSamplesPerBit_ = 0.0;
+
+    // Added 2026-11-23 after live-testing found a real bug: a long run of
+    // identical bits (e.g. the continuous mark "idle" tone CallAudioBridge
+    // sends between bytes -- see CallAudioBridge.h's "DATA MODE" section)
+    // carries no genuine edge-timing information at all -- the early and
+    // late windows are both just measuring the same steady tone, so any
+    // nonzero reading is Goertzel-windowing noise, not a real timing
+    // error. Feeding that noise into the PI loop for thousands of idle
+    // bit periods let `estimatedRateErrorSamplesPerBit_` drift to a real,
+    // wrong, sustained bias -- confirmed live: a message's very first
+    // byte decoded wrong immediately after a multi-second idle gap, then
+    // the rest of the message decoded perfectly once real transitions
+    // gave the loop legitimate error signal to correct from again. Fix:
+    // only trust the early-late measurement on a bit that's different
+    // from the one before it (an actual transition) -- skip scheduling a
+    // correction otherwise. Real data has plenty of transitions (the
+    // async frame's own start/stop bits guarantee at least two per byte),
+    // so this costs essentially nothing during real traffic.
+    bool hasPreviousDecidedBit_ = false;
+    bool previousDecidedBit_ = false;
 };
 
 } // namespace voipmodem::dsp

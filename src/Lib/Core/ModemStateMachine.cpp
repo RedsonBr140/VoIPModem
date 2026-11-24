@@ -182,6 +182,12 @@ ExecutionOutcome ModemStateMachine::ExecuteExtendedCommand(const AtCommand& cmd)
     return outcome;
 }
 
+void ModemStateMachine::EnterCommandModeFromOnlineData() {
+    if (state_ == ModemState::OnlineData) {
+        state_ = ModemState::CommandMode;
+    }
+}
+
 ExecutionOutcome ModemStateMachine::HandleCallEvent(const CallEvent& event) {
     ExecutionOutcome outcome;
     outcome.suppressFinalResult = profile_.quietMode;

@@ -17,6 +17,11 @@ namespace voipmodem {
 // accurate Hayes CONNECT would wait for the modem link instead. There is
 // no Negotiating state transition today for a real call (V8Handshake runs
 // entirely inside CallAudioBridge, invisible to ModemStateMachine).
+// OnlineData can also be left via a real Hayes "+++" escape sequence
+// (ModemInstance's guard-time detector calls
+// ModemStateMachine::EnterCommandModeFromOnlineData(), landing back in
+// CommandMode with the call itself untouched), not just by the call
+// ending.
 enum class ModemState {
     CommandMode,
     Dialing,

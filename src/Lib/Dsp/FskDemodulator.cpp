@@ -104,10 +104,18 @@ std::vector<bool> FskDemodulator::ProcessSamples(const std::vector<Sample>& samp
                 markDetector_.Magnitude(currentBitTargetLength_) > spaceDetector_.Magnitude(currentBitTargetLength_);
             bits.push_back(decidedMark);
 
-            hasPendingCorrection_ = true;
-            pendingBitStartAbs_ = totalSamplesSeen_ - currentBitTargetLength_;
-            pendingBitLen_ = currentBitTargetLength_;
-            pendingBitWasMark_ = decidedMark;
+            // Only a genuine transition carries real edge-timing
+            // information -- see the member comment on
+            // hasPreviousDecidedBit_ for why a steady run (e.g. idle mark
+            // tone) must not feed the PI loop at all.
+            if (hasPreviousDecidedBit_ && decidedMark != previousDecidedBit_) {
+                hasPendingCorrection_ = true;
+                pendingBitStartAbs_ = totalSamplesSeen_ - currentBitTargetLength_;
+                pendingBitLen_ = currentBitTargetLength_;
+                pendingBitWasMark_ = decidedMark;
+            }
+            hasPreviousDecidedBit_ = true;
+            previousDecidedBit_ = decidedMark;
 
             currentBitTargetLength_ = -1; // next sample starts a new bit
         }
