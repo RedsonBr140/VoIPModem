@@ -37,7 +37,7 @@ timeout.
 Args: `password` (when required), `client` (free text). Result:
 
 ```json
-{"service": "VoIPModem", "version": "0.1.0", "protocol": 1, "host": "SRV-GW01",
+{"service": "VoIPModem", "version": "0.0.1", "protocol": 1, "host": "SRV-GW01",
  "platform": "Windows, 32-bit", "engine": "libv90modem 0.6.0", "pjsip": "2.17",
  "configPath": "C:\\VoIPModem\\voipmodem.ini", "runningAsService": true,
  "passwordRequired": false}
