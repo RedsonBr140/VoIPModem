@@ -1,6 +1,10 @@
 #include "PjsipEndpoint.h"
 
-#include <pjsua2.hpp>
+#include <pjsua2.hpp> // before Windows headers (winsock2 ordering)
+
+#include <windows.h>
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
 
 namespace voipmodem {
 
@@ -48,6 +52,7 @@ PjsipEndpoint::~PjsipEndpoint() {
         } catch (const pj::Error& err) {
             logger_.Error("PJSIP libDestroy() failed: " + err.info());
         }
+        timeEndPeriod(1);
     }
 }
 
@@ -72,6 +77,28 @@ bool PjsipEndpoint::Start(int localPort) {
         epConfig.medConfig.sndClockRate = 8000;
         epConfig.medConfig.noVad = true;  // no silence suppression — a steady carrier isn't "silence"
         epConfig.medConfig.ecTailLen = 0; // 0 disables echo cancellation
+
+        // Jitter buffer tuned for a modem, not for voice. Found live
+        // 2026-11-24 (V.90 answering BinModem): PJSIP's defaults -- no
+        // prefetch (jbInit 0) and PROGRESSIVE discard -- ran the receive
+        // buffer empty every 1-3 s ("Jitter buffer empty (prefetch=0), plc
+        // invoked", "Frame lost, recovered!"). Each such event invents or
+        // drops 20 ms of audio, which a V.34 receiver cannot survive: the
+        // upstream died within 3 s of data mode at exactly such an event.
+        // A modem wants a deep, fixed buffer and never a dropped frame;
+        // the added latency only lengthens the round trip, which the
+        // modems measure and absorb in training.
+        epConfig.medConfig.jbInit = 160;
+        epConfig.medConfig.jbMinPre = 120;
+        epConfig.medConfig.jbMaxPre = 400;
+        epConfig.medConfig.jbMax = 1000;
+        epConfig.medConfig.jbDiscardAlgo = PJMEDIA_JB_DISCARD_NONE;
+
+        // No sound card: the null device's clock thread drives the
+        // conference bridge, and at Windows' default ~15.6 ms sleep
+        // granularity it pulls 20 ms frames in uneven bursts. 1 ms timer
+        // resolution for the process keeps that clock steady.
+        timeBeginPeriod(1);
 
         endpoint_->libInit(epConfig);
 
@@ -108,6 +135,18 @@ void PjsipEndpoint::RestrictCodecsToG711() {
             endpoint_->codecSetPriority(codec.codecId, isG711 ? static_cast<pj_uint8_t>(210) : 0);
         } catch (const pj::Error& err) {
             logger_.Warn("Failed to set priority for codec '" + codec.codecId + "': " + err.info());
+        }
+        if (isG711) {
+            // No packet loss concealment: a missing frame must stay
+            // silence, not synthetic audio a modem receiver would try
+            // to demodulate (see the jitter buffer note in Start()).
+            try {
+                pj::CodecParam param = endpoint_->codecGetParam(codec.codecId);
+                param.setting.plc = false;
+                endpoint_->codecSetParam(codec.codecId, param);
+            } catch (const pj::Error& err) {
+                logger_.Warn("Failed to disable PLC for codec '" + codec.codecId + "': " + err.info());
+            }
         }
     }
 }
