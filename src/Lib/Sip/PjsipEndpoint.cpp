@@ -100,6 +100,12 @@ bool PjsipEndpoint::Start(int localPort) {
         // resolution for the process keeps that clock steady.
         timeBeginPeriod(1);
 
+        // Only a UDP transport is created (below). By default PJSIP moves
+        // any request of 1300 bytes or more to TCP (RFC 3261 18.1.1); with
+        // no TCP transport that attempt fails ("Unsupported transport",
+        // seen on XP) before PJSIP falls back to UDP. Stay on UDP.
+        pjsip_cfg()->endpt.disable_tcp_switch = PJ_TRUE;
+
         endpoint_->libInit(epConfig);
 
         pj::TransportConfig transportConfig;

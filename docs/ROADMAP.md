@@ -179,9 +179,10 @@ versions) per Windows generation where needed.
   - **Verified live on 32-bit Windows XP** (VM, 2026-11-24): PJSIP
     started, the COM port opened, the line registered with Asterisk, and a
     modem call connected at **V.34**.
-  - Seen on XP: PJSIP logs "Unsupported transport" when an INVITE is 1300
-    bytes or more. It switches such requests to TCP, which VoIPModem does
-    not open, then falls back to UDP. Harmless, but noisy.
+  - Seen on XP: PJSIP logged "Unsupported transport" when an INVITE was
+    1300 bytes or more: it switches such requests to TCP, which VoIPModem
+    does not open, then fell back to UDP. Fixed: TCP switching is now off
+    (`disable_tcp_switch`), so requests stay on UDP.
 - **Next**: the x64 XP build (XP x64 / Server 2003 x64, untested so far),
   Server 2003 itself, then CI, if GitHub's runner image has `v141_xp`.
 
