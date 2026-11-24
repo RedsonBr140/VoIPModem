@@ -22,7 +22,7 @@ runs:
   using: composite
   steps:
     - name: Set up MSBuild
-      uses: microsoft/setup-msbuild@v2
+      uses: microsoft/setup-msbuild@v3
 
     # pjproject needs config_site.h in place both to build it and to compile
     # anything that includes its headers, so this runs on a cache hit too.
