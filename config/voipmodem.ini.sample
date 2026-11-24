@@ -1,71 +1,71 @@
-; VoIPModem configuration — Phase 1 (serial/Hayes skeleton) + Phase 2 (SIP).
+; VoIPModem configuration.
 ; Copy this file to voipmodem.ini next to the executable (or pass a path
-; as the first command-line argument) and adjust as needed.
-;
-; RTP/DSP codec settings described in docs/PROJECT_SPEC.md section 5 are
-; not yet read by any code and are intentionally omitted here; they will
-; be added once Phase 3 adds the modules that consume them.
+; as the first command-line argument) and adjust as needed. See
+; docs/ARCHITECTURE.md for what each part does.
 
 [Logging]
-; One of: Error, Warn, Info, Debug
+; One of: Error, Warn, Info, Debug. Debug includes PJSIP's own SIP/RTP
+; trace, which is what you want when diagnosing a call.
 Level=Info
 File=voipmodem.log
 
-; Process-wide SIP transport. Required (nonzero) for any modem instance's
-; SipServer setting below to actually do anything — without it, every
-; instance falls back to NullCallController (ATD/ATA honestly fail)
-; regardless of its own Sip* settings. One UDP port is shared by every
-; instance's SIP account; see docs/ARCHITECTURE.md "SIP integration
-; (Phase 2)" for why this is process-wide rather than per-instance.
+; Process-wide SIP transport. Required (nonzero) for any modem line's
+; SipServer setting below to do anything: without it, every line falls
+; back to NullCallController (ATD/ATA honestly fail). One UDP port is
+; shared by every line's SIP account.
 [SIP]
 LocalPort=5060
 
-; --- Single modem line (legacy Phase 1 form) ---
-; A bare [Modem] section configures exactly one modem line and is still
-; fully supported. Use this if you only have one COM port to dial through.
+; --- Single modem line ---
+; A bare [Modem] section configures exactly one modem line.
 [Modem]
-; Virtual COM port created by com0com (see docs/PROJECT_SPEC.md section 3).
+; The COM port VoIPModem opens: one side of a com0com pair. Windows'
+; modem driver (and RAS) binds to the OTHER side of the pair.
 ComPort=COM3
 
-; Local DTE-to-modem serial speed. This is NOT the negotiated modem-to-modem
-; connection speed, which has no meaning yet since there is no DSP/modulation
-; backend (Phase 4).
+; DTE-to-modem serial speed on the virtual port. Not the modem-to-modem
+; rate, which the modems negotiate and CONNECT reports.
 BaudRate=115200
 
 ; Text returned by ATI.
 Identification=VoIPModem Virtual Modem
 
 ; S0 register initial value (auto-answer ring count). 0 disables
-; auto-answer (ATA must be typed manually); a value > 0 answers
-; automatically after that many RING lines.
+; auto-answer (ATA must be typed); a value > 0 answers after that many
+; RINGs. A modem-bank line that RAS answers on its own can use either.
 AutoAnswerRingCount=0
 
-; SIP registration for this instance's extension. Leave SipServer empty
-; (or omit these four keys entirely) to keep this instance on
-; NullCallController — ATD/ATA will honestly return NO CARRIER/NO ANSWER
-; instead of silently doing nothing. Fill in your own Asterisk server and
-; extension credentials below — do not commit real credentials here;
-; voipmodem.ini itself is gitignored for exactly that reason.
+; Modulations this line's modem offers, comma-separated: V21, V22
+; (V.22 and V.22bis), V32BIS, V34, V90, V92, BELL103, BELL212A. Leave it
+; out (or empty) for the default: V.92, V.90, V.34, V.32bis, V.22bis,
+; V.22 and V.21. Example, to keep calls out of V.90/V.92 PCM:
+; Modulations=V21,V22,V32BIS,V34
+
+; 1 = play the call's audio (both directions mixed), plus the dial tone
+; and DTMF digits when dialling, on this PC's default sound output, like
+; a modem speaker. Enable it on one line at most.
+; EnableLocalAudio=0
+
+; SIP registration for this line's extension. Leave SipServer empty (or
+; omit these keys) to keep this line on NullCallController. Do not
+; commit real credentials: voipmodem.ini itself is gitignored.
 ; SipServer=sip.example.com:5060
 ; SipExtension=1001
 ; SipPassword=changeme
 ; SipRealm=*   ; default; only needed if Asterisk challenges with a specific realm
 
 ; --- Multiple modem lines ---
-; To run more than one modem line at once, delete the [Modem] section
-; above and add one [Modem.<name>] section per line instead, each with
-; its own ComPort and its own SIP extension. <name> is only used to label
-; that line's log output — pick anything readable. Each line runs on its
-; own thread with its own state machine, entirely independent of the
-; others, but all share the one [SIP] LocalPort transport. See
-; docs/ARCHITECTURE.md "Multiple modem instances" and "SIP integration
-; (Phase 2)".
+; To run several lines (a modem bank), delete the [Modem] section above
+; and add one [Modem.<name>] section per line instead, each with its own
+; ComPort and SIP extension. <name> only labels that line's log output.
+; Each line runs on its own thread with its own modem; all share the
+; one [SIP] LocalPort transport.
 ;
 ; [Modem.Line1]
 ; ComPort=COM3
 ; BaudRate=115200
 ; Identification=VoIPModem Virtual Modem (Line1)
-; AutoAnswerRingCount=0
+; AutoAnswerRingCount=1
 ; SipServer=sip.example.com:5060
 ; SipExtension=1001
 ; SipPassword=changeme
@@ -74,7 +74,7 @@ AutoAnswerRingCount=0
 ; ComPort=COM5
 ; BaudRate=115200
 ; Identification=VoIPModem Virtual Modem (Line2)
-; AutoAnswerRingCount=0
+; AutoAnswerRingCount=1
 ; SipServer=sip.example.com:5060
 ; SipExtension=1002
 ; SipPassword=changeme-too
