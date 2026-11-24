@@ -1,3 +1,6 @@
 [submodule "third_party/pjproject"]
 	path = third_party/pjproject
 	url = https://github.com/pjsip/pjproject.git
+[submodule "third_party/libv90modem"]
+	path = third_party/libv90modem
+	url = https://github.com/georgica/libv90modem.git

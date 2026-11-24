@@ -39,7 +39,7 @@
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\third_party\libv90modem\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -102,11 +102,15 @@
     <ClCompile Include="V8SignalTests.cpp" />
     <ClCompile Include="AnsamToneTests.cpp" />
     <ClCompile Include="V8HandshakeTests.cpp" />
+    <ClCompile Include="LibV90ModemTests.cpp" />
     <ClCompile Include="ModemStateMachineTests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\src\Lib\VoIPModemLib.vcxproj">
       <Project>{FF845D14-9AF0-4C28-B403-D3248D94AECF}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\third_party\libv90modem-build\libv90modem.vcxproj">
+      <Project>{6B1E2C3A-9D4F-4E7A-8B21-5C0F3A9D7E11}</Project>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

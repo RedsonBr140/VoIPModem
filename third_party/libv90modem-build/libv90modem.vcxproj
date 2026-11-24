@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSVC build of the third_party/libv90modem submodule (GPL-2.0-only,
+  C99 softmodem library). Upstream only ships a GNU Makefile; this
+  mirrors its LIB_SRC list (api/v90modem.c, modem/ v90/ v34/ v32/ v92/,
+  and the six v42/ sources) and include paths. Compiled as C11 (MSVC
+  has no C99 mode; the sources are C99-clean under it).
+-->
+<Project DefaultTargets="Build" ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{6B1E2C3A-9D4F-4E7A-8B21-5C0F3A9D7E11}</ProjectGuid>
+    <RootNamespace>libv90modem</RootNamespace>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Release'">false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <UpstreamDir>$(MSBuildThisFileDirectory)..\libv90modem\</UpstreamDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <CompileAs>CompileAsC</CompileAs>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <WarningLevel>Level3</WarningLevel>
+      <!-- C4068: upstream's '#pragma GCC'; C4334: constant (1 << n) compared to int64, intended -->
+      <DisableSpecificWarnings>4068;4334;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <AdditionalIncludeDirectories>$(UpstreamDir)include;$(UpstreamDir)api;$(UpstreamDir)modem;$(UpstreamDir)v90;$(UpstreamDir)v92;$(UpstreamDir)v34;$(UpstreamDir)v32;$(UpstreamDir)v42;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <Optimization>MaxSpeed</Optimization>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <!-- DSP in real time on PJSIP's media thread: optimise even in Debug -->
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="$(UpstreamDir)api\v90modem.c" />
+    <ClCompile Include="$(UpstreamDir)modem\*.c" />
+    <ClCompile Include="$(UpstreamDir)v90\*.c" />
+    <ClCompile Include="$(UpstreamDir)v34\*.c" />
+    <ClCompile Include="$(UpstreamDir)v32\*.c" />
+    <ClCompile Include="$(UpstreamDir)v92\*.c" />
+    <ClCompile Include="$(UpstreamDir)v42\v42_hdlc.c;$(UpstreamDir)v42\v42_detect.c;$(UpstreamDir)v42\v42_comp.c;$(UpstreamDir)v42\v44_comp.c;$(UpstreamDir)v42\v42_lapm.c;$(UpstreamDir)v42\v42.c" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

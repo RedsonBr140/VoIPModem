@@ -86,6 +86,9 @@
     <ProjectReference Include="..\Lib\VoIPModemLib.vcxproj">
       <Project>{FF845D14-9AF0-4C28-B403-D3248D94AECF}</Project>
     </ProjectReference>
+    <ProjectReference Include="..\..\third_party\libv90modem-build\libv90modem.vcxproj">
+      <Project>{6B1E2C3A-9D4F-4E7A-8B21-5C0F3A9D7E11}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

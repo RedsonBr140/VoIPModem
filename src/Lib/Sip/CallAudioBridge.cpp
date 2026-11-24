@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <optional>
 #include <string>
+
+extern "C" {
+#include <v90modem.h>
+}
 
 namespace voipmodem {
 
@@ -11,258 +14,290 @@ namespace {
 
 constexpr int kBitsPerSample = 16;
 constexpr int kFrameTimeUsec = 20000; // 20ms -> 160 samples at 8kHz
-constexpr dsp::Sample kV34NominalAmplitude = 0.8f;
+constexpr int kSampleRateHz = 8000;
 
-// Same V.21 channel table and baud rate V8Handshake already uses
-// (confirmed against V.21's own frequency table, not re-derived here --
-// see FskModulator.h's own class comment) -- duplicated rather than
-// shared across translation units, matching this codebase's existing
-// style (V8Handshake.cpp keeps its own copy too).
-constexpr double kChannel1MarkHz = 980.0;
-constexpr double kChannel1SpaceHz = 1180.0;
-constexpr double kChannel2MarkHz = 1650.0;
-constexpr double kChannel2SpaceHz = 1850.0;
-constexpr double kDataBaudRate = 300.0;
-constexpr dsp::Sample kDataAmplitude = 0.6f;
+// The C callbacks libv90modem calls from inside v90m_process_*; all on
+// pjsua2's media thread (see CallAudioBridge's class comment).
+int GetBitCallback(void* user) { return static_cast<CallAudioBridge*>(user)->ModemGetBit(); }
+void PutBitCallback(void* user, int bit) { static_cast<CallAudioBridge*>(user)->ModemPutBit(bit); }
+void EventCallback(void* user, v90m_event ev) { static_cast<CallAudioBridge*>(user)->OnModemEvent(static_cast<int>(ev)); }
 
-int16_t FloatToPcm16(float sample) {
-    const float clamped = std::clamp(sample, -1.0f, 1.0f);
-    return static_cast<int16_t>(clamped * 32767.0f);
-}
-
-float Pcm16ToFloat(int16_t sample) {
-    return static_cast<float>(sample) / 32768.0f;
-}
-
-dsp::V8CallMenu MakeLocalMenu(bool advertiseV34) {
-    dsp::V8CallMenu menu;
-    menu.callFunction = dsp::V8CallFunction::Data;
-    dsp::V8ModulationModes modes;
-    modes.v21 = true; // the only modulation this codebase implements end to end
-    // Only advertised when explicitly opted in -- see
-    // ModemInstanceConfig::enableV34Probing's comment for why this
-    // isn't on by default: a real V.34-capable remote modem would
-    // commit to training this codebase can't finish past Phase 2's
-    // first RTD/L1 exchange.
-    modes.v34Duplex = advertiseV34;
-    menu.modulationModes = modes;
-    return menu;
-}
-
-bool IsV34Mode(dsp::V8ModulationModeItem item) {
-    return item == dsp::V8ModulationModeItem::V34Duplex || item == dsp::V8ModulationModeItem::V34HalfDuplex;
-}
-
-std::string DescribeModulationModes(dsp::V8ModulationModeItem selected) {
-    switch (selected) {
-        case dsp::V8ModulationModeItem::V34Duplex: return "V.34 (duplex)";
-        case dsp::V8ModulationModeItem::V34HalfDuplex: return "V.34 (half-duplex)";
-        case dsp::V8ModulationModeItem::V32bisOrV32: return "V.32bis/V.32";
-        case dsp::V8ModulationModeItem::V22bisOrV22: return "V.22bis/V.22";
-        case dsp::V8ModulationModeItem::V17: return "V.17";
-        case dsp::V8ModulationModeItem::V29HalfDuplex: return "V.29 (half-duplex)";
-        case dsp::V8ModulationModeItem::V27ter: return "V.27ter";
-        case dsp::V8ModulationModeItem::V26ter: return "V.26ter";
-        case dsp::V8ModulationModeItem::V26bis: return "V.26bis";
-        case dsp::V8ModulationModeItem::V23Duplex: return "V.23 (duplex)";
-        case dsp::V8ModulationModeItem::V23HalfDuplex: return "V.23 (half-duplex)";
-        case dsp::V8ModulationModeItem::V21: return "V.21";
+const char* DescribeConnection(v90m_conn c) {
+    switch (c) {
+        case V90M_CONN_V21: return "V.21";
+        case V90M_CONN_V22: return "V.22";
+        case V90M_CONN_V22BIS: return "V.22bis";
+        case V90M_CONN_V90: return "V.90";
+        case V90M_CONN_V34: return "V.34";
+        case V90M_CONN_V32BIS: return "V.32bis";
+        case V90M_CONN_V92: return "V.92";
+        case V90M_CONN_BELL103: return "Bell 103";
+        case V90M_CONN_BELL212A: return "Bell 212A";
+        case V90M_CONN_X2: return "x2";
+        case V90M_CONN_K56FLEX: return "K56flex";
+        default: return "none";
     }
-    return "unknown";
+}
+
+const char* DescribeEnd(v90m_end e) {
+    switch (e) {
+        case V90M_END_NONE: return "none";
+        case V90M_END_FAILED: return "start-up failed";
+        case V90M_END_LOST: return "connection lost";
+        case V90M_END_CLEARDOWN_FAR: return "far modem cleared down";
+        case V90M_END_CLEARDOWN_OURS: return "we cleared down";
+        case V90M_END_NO_ANSWER_TONE: return "no answer tone";
+        case V90M_END_NO_JM: return "ANSam heard but no JM answered our CM";
+        case V90M_END_NO_COMMON: return "V.8 found no modulation in common";
+        case V90M_END_RETRAIN_FAILED: return "retrain failed";
+        case V90M_END_X2_FAILED: return "x2 start-up failed";
+        case V90M_END_K56_FAILED: return "K56flex start-up failed";
+        default: return "unknown";
+    }
+}
+
+const char* DescribeEcState(int s) {
+    switch (s) {
+        case V90M_EC_DETECT: return "detection phase";
+        case V90M_EC_ESTABLISH: return "establishing LAPM";
+        case V90M_EC_CONNECTED: return "V.42 LAPM connected";
+        case V90M_EC_ASYNC: return "no error control (start-stop fallback)";
+        case V90M_EC_RELEASING: return "releasing";
+        case V90M_EC_DISCONNECTED: return "disconnected";
+        default: return "unknown";
+    }
+}
+
+const char* DescribeCompression(int alg) {
+    switch (alg) {
+        case V90M_EC_COMP_V42BIS: return "V.42bis";
+        case V90M_EC_COMP_V44: return "V.44";
+        default: return "none";
+    }
 }
 
 } // namespace
 
-CallAudioBridge::CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableV34Probing, bool enableLocalAudio)
-    : callingParty_(callingParty),
-      logger_(logger),
-      enableV34Probing_(enableV34Probing),
-      handshake_(callingParty ? dsp::V8Handshake::Role::CallDce : dsp::V8Handshake::Role::AnswerDce,
-                 MakeLocalMenu(enableV34Probing), logger) {
+CallAudioBridge::CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableV34Probing, bool enableLocalAudio,
+                                 bool alaw)
+    : callingParty_(callingParty), logger_(logger) {
+    (void)enableV34Probing; // see header
+
+    v90m_cfg cfg;
+    v90m_cfg_default(&cfg);
+    cfg.role = callingParty ? V90M_ROLE_ORIGINATE : V90M_ROLE_ANSWER;
+    cfg.modulations |= V90M_MOD_V92; // falls back to V.90 / lower by itself
+    cfg.alaw = alaw ? 1 : 0;
+    cfg.getbit = GetBitCallback;
+    cfg.putbit = PutBitCallback;
+    cfg.on_event = EventCallback;
+    cfg.user = this;
+
+    int err = 0;
+    modem_ = v90m_create(&cfg, &err);
+    if (modem_ == nullptr) {
+        logger_.Error("libv90modem: v90m_create failed, error " + std::to_string(err));
+    }
+
+    v90m_ec_cfg ecCfg;
+    v90m_ec_cfg_default(&ecCfg, callingParty ? 1 : 0);
+    ec_ = v90m_ec_create(&ecCfg, &err);
+    if (ec_ == nullptr) {
+        logger_.Error("libv90modem: v90m_ec_create failed, error " + std::to_string(err));
+    }
+
     if (enableLocalAudio) {
         localSpeaker_.emplace();
     }
 }
 
+CallAudioBridge::~CallAudioBridge() {
+    // Detach from the conference bridge first (asynchronous), then take
+    // the modem away under frameMutex_ so a frame callback already in
+    // flight finishes before it's freed, and any later one sees nullptr.
+    // pj::AudioMediaPort's own destructor then stops callbacks for good;
+    // the window between our members' destruction and that is
+    // pre-existing pjsua2 behaviour, not new to this class.
+    try {
+        unregisterMediaPort();
+    } catch (const pj::Error&) {
+    }
+    std::lock_guard<std::mutex> lock(frameMutex_);
+    v90m_ec_destroy(ec_);
+    ec_ = nullptr;
+    ecActive_ = false;
+    v90m_destroy(modem_);
+    modem_ = nullptr;
+}
+
 void CallAudioBridge::Start(pj::AudioMedia& callAudio) {
     pj::MediaFormatAudio format;
-    format.init(PJMEDIA_FORMAT_PCM, dsp::kSampleRateHz, 1, kFrameTimeUsec, kBitsPerSample);
-    createPort("voipmodem-v8-handshake", format);
+    format.init(PJMEDIA_FORMAT_PCM, kSampleRateHz, 1, kFrameTimeUsec, kBitsPerSample);
+    createPort("voipmodem-libv90modem", format);
 
-    // Bidirectional: call audio -> this port (onFrameReceived), and this
-    // port -> call audio (onFrameRequested).
     callAudio.startTransmit(*this);
     startTransmit(callAudio);
 
-    logger_.Info(std::string("CallAudioBridge started (") + (callingParty_ ? "calling party" : "answering party") +
-                 "); running the real ITU-T V.8 handshake (ANSam/CM/JM/CJ), advertising V.21" +
-                 (enableV34Probing_ ? "+V.34 (probing only, not a connection)" : " only") +
+    logger_.Info(std::string("CallAudioBridge started (") + (callingParty_ ? "calling" : "answering") +
+                 "); libv90modem " + v90m_version() +
+                 " offering V.92/V.90/V.34/V.32bis/V.22bis/V.22/V.21 with V.42" +
                  (localSpeaker_.has_value() ? "; local audio monitor enabled" : ""));
 }
 
+int CallAudioBridge::ModemGetBit() {
+    return ecActive_ ? v90m_ec_tx_bit(ec_) : 1; // mark until connected
+}
+
+void CallAudioBridge::ModemPutBit(int bit) {
+    if (ecActive_) {
+        v90m_ec_rx_bit(ec_, bit);
+    }
+}
+
+void CallAudioBridge::OnModemEvent(int event) {
+    v90m_state st;
+    v90m_get_state(modem_, &st);
+
+    switch (static_cast<v90m_event>(event)) {
+        case V90M_EV_CONNECTED: {
+            v90m_stats stats;
+            v90m_get_stats(modem_, &stats);
+            logger_.Info(std::string("libv90modem: CONNECTED ") + DescribeConnection(st.modulation) + " tx " +
+                         std::to_string(st.tx_bps) + " / rx " + std::to_string(st.rx_bps) + " bit/s" +
+                         (st.used_v8 ? " (via V.8)" : " (no V.8)") + ", SNR " +
+                         (stats.snr_db10 >= 0 ? std::to_string(stats.snr_db10 / 10.0) + " dB" : "n/a") +
+                         ", round trip " + std::to_string(stats.rtd) + " samples");
+            v90m_ec_cfg ecCfg;
+            v90m_ec_cfg_default(&ecCfg, callingParty_ ? 1 : 0);
+            if (!callingParty_ && st.odp_bypass) {
+                ecCfg.detect = 0; // V.92 9.3.1: both named LAPM in V.8, caller skips ODP
+            }
+            if (ec_ != nullptr && v90m_ec_reset(ec_, &ecCfg) == V90M_OK) {
+                ecActive_ = true;
+                lastEcState_ = -1;
+            } else {
+                logger_.Error("libv90modem: V.42 endpoint reset failed; no data will flow");
+            }
+            break;
+        }
+        case V90M_EV_RATES:
+            logger_.Info(std::string("libv90modem: rates now ") + DescribeConnection(st.modulation) + " tx " +
+                         std::to_string(st.tx_bps) + " / rx " + std::to_string(st.rx_bps));
+            break;
+        case V90M_EV_DATA_STOPPED:
+            logger_.Info("libv90modem: data stopped (retrain or renegotiation)");
+            if (ecActive_) v90m_ec_line_stopped(ec_);
+            break;
+        case V90M_EV_DATA_MOVING:
+            logger_.Info("libv90modem: data moving");
+            if (ecActive_) v90m_ec_line_restored(ec_);
+            break;
+        case V90M_EV_ENDED: {
+            logger_.Info(std::string("libv90modem: modem ended -- ") + DescribeEnd(st.end));
+            if (ecActive_) {
+                v90m_ec_abort(ec_);
+                ecActive_ = false;
+            }
+            std::lock_guard<std::mutex> lock(dataMutex_);
+            modemEnded_ = true;
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+void CallAudioBridge::LogErrorControlState() {
+    const int state = v90m_ec_state(ec_);
+    if (state == lastEcState_) {
+        return;
+    }
+    lastEcState_ = state;
+    std::string message = std::string("libv90modem: V.42 ") + DescribeEcState(state);
+    if (state == V90M_EC_CONNECTED || state == V90M_EC_DISCONNECTED) {
+        v90m_ec_status status;
+        v90m_ec_get_status(ec_, &status);
+        if (state == V90M_EC_CONNECTED) {
+            message += std::string(", compression ") + DescribeCompression(status.comp_alg);
+        } else {
+            message += ", reason " + std::to_string(status.reason);
+        }
+    }
+    logger_.Info(message);
+}
+
+void CallAudioBridge::PumpErrorControl(unsigned elapsedMs) {
+    if (!ecActive_) {
+        return;
+    }
+    v90m_ec_tick(ec_, elapsedMs);
+
+    {
+        std::lock_guard<std::mutex> lock(dataMutex_);
+        size_t space = v90m_ec_write_space(ec_);
+        std::uint8_t chunk[256];
+        while (space > 0 && !txByteQueue_.empty()) {
+            size_t n = 0;
+            while (n < sizeof chunk && n < space && !txByteQueue_.empty()) {
+                chunk[n++] = txByteQueue_.front();
+                txByteQueue_.pop_front();
+            }
+            const size_t accepted = v90m_ec_write(ec_, chunk, n);
+            for (size_t i = n; i > accepted; --i) {
+                txByteQueue_.push_front(chunk[i - 1]); // give back what didn't fit
+            }
+            if (accepted < n) break;
+            space = v90m_ec_write_space(ec_);
+        }
+
+        std::uint8_t buf[256];
+        size_t got;
+        while ((got = v90m_ec_read(ec_, buf, sizeof buf)) > 0) {
+            rxByteQueue_.insert(rxByteQueue_.end(), buf, buf + got);
+        }
+    }
+
+    LogErrorControlState();
+}
+
 void CallAudioBridge::onFrameRequested(pj::MediaFrame& frame) {
-    const unsigned capacityBytes = frame.size;
-    const unsigned sampleCount = capacityBytes / sizeof(int16_t);
-
-    frame.buf.resize(capacityBytes);
+    const unsigned sampleCount = frame.size / sizeof(std::int16_t);
+    frame.buf.resize(frame.size);
     frame.type = PJMEDIA_FRAME_TYPE_AUDIO;
-
     for (unsigned i = 0; i < sampleCount; ++i) {
-        const float sample = (i < pendingTxSamples_.size()) ? pendingTxSamples_[i] : 0.0f;
-        const int16_t pcm = FloatToPcm16(sample);
+        const std::int16_t pcm = (i < pendingTxSamples_.size()) ? pendingTxSamples_[i] : 0;
         frame.buf[2 * i] = static_cast<unsigned char>(pcm & 0xFF);
         frame.buf[2 * i + 1] = static_cast<unsigned char>((pcm >> 8) & 0xFF);
     }
 }
 
-void CallAudioBridge::PlayLocally(const std::vector<dsp::Sample>& rxSamples,
-                                   const std::vector<dsp::Sample>& txSamples) {
+void CallAudioBridge::onFrameReceived(pj::MediaFrame& frame) {
+    const size_t sampleCount = frame.buf.size() / sizeof(std::int16_t);
+    std::lock_guard<std::mutex> frameLock(frameMutex_);
+    if (sampleCount == 0 || modem_ == nullptr) {
+        return;
+    }
+
+    std::vector<std::int16_t> rx(sampleCount);
+    for (size_t i = 0; i < sampleCount; ++i) {
+        rx[i] = static_cast<std::int16_t>(frame.buf[2 * i] | (frame.buf[2 * i + 1] << 8));
+    }
+
+    pendingTxSamples_.assign(sampleCount, 0);
+    v90m_process_linear(modem_, rx.data(), pendingTxSamples_.data(), sampleCount);
+
+    PumpErrorControl(static_cast<unsigned>(sampleCount * 1000 / kSampleRateHz));
+    PlayLocally(rx, pendingTxSamples_);
+}
+
+void CallAudioBridge::PlayLocally(const std::vector<std::int16_t>& rx, const std::vector<std::int16_t>& tx) {
     if (!localSpeaker_.has_value() || !localSpeaker_->IsAvailable()) {
         return;
     }
-    // A real phone line acoustically mixes both directions onto the one
-    // wire a monitoring speaker taps; mirror that by summing RX (the
-    // far end's tones) and TX (this side's own) rather than playing
-    // only one direction.
-    std::vector<dsp::Sample> mixed(std::max(rxSamples.size(), txSamples.size()), 0.0f);
-    for (size_t i = 0; i < rxSamples.size(); ++i) {
-        mixed[i] += rxSamples[i];
-    }
-    for (size_t i = 0; i < txSamples.size(); ++i) {
-        mixed[i] += txSamples[i];
-    }
+    std::vector<dsp::Sample> mixed(std::max(rx.size(), tx.size()), 0.0f);
+    for (size_t i = 0; i < rx.size(); ++i) mixed[i] += rx[i] / 32768.0f;
+    for (size_t i = 0; i < tx.size(); ++i) mixed[i] += tx[i] / 32768.0f;
     localSpeaker_->Write(mixed);
-}
-
-void CallAudioBridge::onFrameReceived(pj::MediaFrame& frame) {
-    const unsigned sampleCount = static_cast<unsigned>(frame.buf.size()) / sizeof(int16_t);
-    if (sampleCount == 0) {
-        return;
-    }
-
-    std::vector<dsp::Sample> samples;
-    samples.reserve(sampleCount);
-    for (unsigned i = 0; i < sampleCount; ++i) {
-        const int16_t pcm = static_cast<int16_t>(frame.buf[2 * i] | (frame.buf[2 * i + 1] << 8));
-        samples.push_back(Pcm16ToFloat(pcm));
-    }
-
-    // Once V8 has handed off to V.34 Phase 2, that state machine owns
-    // this call's audio from here on -- V8Handshake has nothing left
-    // to do once Negotiated.
-    if (phase2Handshake_.has_value()) {
-        phase2Handshake_->ProcessFrame(samples, pendingTxSamples_, static_cast<int>(sampleCount));
-        PlayLocally(samples, pendingTxSamples_);
-
-        if (!loggedRtd_ && phase2Handshake_->GetOutcome() == dsp::V34Phase2Outcome::RoundTripDelayMeasured) {
-            loggedRtd_ = true;
-            const double rtdMs = phase2Handshake_->GetRoundTripDelaySeconds() * 1000.0;
-            logger_.Info("CallAudioBridge: V.34 Phase 2 round-trip delay measured: " + std::to_string(rtdMs) + "ms");
-        }
-        if (!loggedL1_ && phase2Handshake_->GetHasReceivedL1()) {
-            loggedL1_ = true;
-            logger_.Info("CallAudioBridge: V.34 Phase 2 received L1 (not yet implemented past this point)");
-        }
-        return;
-    }
-
-    // Once V8 has handed off to the real V.21 data link, that owns this
-    // call's audio from here on too -- V8Handshake has nothing left to
-    // do once Negotiated. See class comment's "DATA MODE" section.
-    if (dataLinkActive_) {
-        RunDataLink(samples, static_cast<int>(sampleCount));
-        PlayLocally(samples, pendingTxSamples_);
-        return;
-    }
-
-    handshake_.ProcessFrame(samples, pendingTxSamples_, static_cast<int>(sampleCount));
-    PlayLocally(samples, pendingTxSamples_);
-
-    if (!loggedOutcome_ && handshake_.GetOutcome() == dsp::V8HandshakeOutcome::Negotiated) {
-        loggedOutcome_ = true;
-        const auto& remoteMenu = handshake_.GetRemoteMenu();
-        std::optional<dsp::V8ModulationModeItem> selected;
-        if (remoteMenu.has_value() && remoteMenu.value().modulationModes.has_value()) {
-            selected = dsp::SelectModulationMode(remoteMenu.value().modulationModes.value());
-        }
-        const std::string modeDescription = selected.has_value() ? DescribeModulationModes(selected.value())
-                                                                   : "none in common";
-        logger_.Info("CallAudioBridge: V.8 handshake negotiated -- selected mode: " + modeDescription);
-
-        if (enableV34Probing_ && selected.has_value() && IsV34Mode(selected.value())) {
-            phase2Handshake_.emplace(callingParty_ ? dsp::V34Phase2Handshake::Role::CallDce
-                                                    : dsp::V34Phase2Handshake::Role::AnswerDce,
-                                      kV34NominalAmplitude, logger_);
-            logger_.Info("CallAudioBridge: starting V.34 Phase 2 line probing");
-        } else if (selected.has_value() && selected.value() == dsp::V8ModulationModeItem::V21) {
-            StartDataLink();
-        }
-    }
-}
-
-void CallAudioBridge::StartDataLink() {
-    // Same channel assignment V8Handshake already uses: the calling
-    // party transmits on channel 1 and listens on channel 2; the
-    // answering party is the mirror image.
-    const double txMark = callingParty_ ? kChannel1MarkHz : kChannel2MarkHz;
-    const double txSpace = callingParty_ ? kChannel1SpaceHz : kChannel2SpaceHz;
-    const double rxMark = callingParty_ ? kChannel2MarkHz : kChannel1MarkHz;
-    const double rxSpace = callingParty_ ? kChannel2SpaceHz : kChannel1SpaceHz;
-
-    dataModulator_.emplace(txMark, txSpace, kDataBaudRate, kDataAmplitude, dsp::kSampleRateHz);
-    dataDemodulator_.emplace(rxMark, rxSpace, kDataBaudRate, dsp::kSampleRateHz);
-    dataLinkActive_ = true;
-    logger_.Info("CallAudioBridge: V.21 data link active -- real byte passthrough now running");
-}
-
-void CallAudioBridge::RunDataLink(const std::vector<dsp::Sample>& rxSamples, int sampleCount) {
-    // RX: decode new bits, assemble async-framed bytes from them, and
-    // queue whatever comes out for the application to drain.
-    const auto newBits = dataDemodulator_->ProcessSamples(rxSamples);
-    pendingRxBits_.insert(pendingRxBits_.end(), newBits.begin(), newBits.end());
-    for (;;) {
-        if (pendingRxBits_.size() - rxBitCursor_ < 10) {
-            break; // not enough bits yet for even one async-framed byte
-        }
-        const auto decoded = dsp::FskDemodulator::TryDecodeAsyncByte(pendingRxBits_, rxBitCursor_);
-        if (decoded.has_value()) {
-            std::lock_guard<std::mutex> lock(dataMutex_);
-            rxByteQueue_.push_back(*decoded);
-            continue;
-        }
-        ++rxBitCursor_; // genuine framing mismatch (wrong start/stop bit) -- resync by one bit
-    }
-    // Periodically compact pendingRxBits_ so it doesn't grow without
-    // bound over a long call -- same technique this codebase already
-    // used for this exact purpose in an earlier increment (see
-    // docs/ROADMAP.md Phase 4).
-    if (rxBitCursor_ > 4096) {
-        pendingRxBits_.erase(pendingRxBits_.begin(), pendingRxBits_.begin() + static_cast<long>(rxBitCursor_));
-        rxBitCursor_ = 0;
-    }
-
-    // TX: keep dataTxSampleBuffer_ topped up to at least sampleCount,
-    // generating from queued application bytes when there are any, or
-    // a continuous mark ("idle") tone otherwise -- exactly what a real
-    // async line does between bytes.
-    while (dataTxSampleBuffer_.size() < static_cast<size_t>(sampleCount)) {
-        std::optional<std::uint8_t> nextByte;
-        {
-            std::lock_guard<std::mutex> lock(dataMutex_);
-            if (!txByteQueue_.empty()) {
-                nextByte = txByteQueue_.front();
-                txByteQueue_.pop_front();
-            }
-        }
-        if (nextByte.has_value()) {
-            dataModulator_->ModulateByteAsync(dataTxSampleBuffer_, *nextByte);
-        } else {
-            dataModulator_->ModulateBit(dataTxSampleBuffer_, /*bit=*/true); // mark = idle
-        }
-    }
-
-    pendingTxSamples_.assign(dataTxSampleBuffer_.begin(), dataTxSampleBuffer_.begin() + sampleCount);
-    dataTxSampleBuffer_.erase(dataTxSampleBuffer_.begin(), dataTxSampleBuffer_.begin() + sampleCount);
 }
 
 void CallAudioBridge::EnqueueTxByte(std::uint8_t byte) {
@@ -275,6 +310,11 @@ std::vector<std::uint8_t> CallAudioBridge::DrainRxBytes() {
     std::vector<std::uint8_t> result(rxByteQueue_.begin(), rxByteQueue_.end());
     rxByteQueue_.clear();
     return result;
+}
+
+bool CallAudioBridge::HasModemEnded() const {
+    std::lock_guard<std::mutex> lock(dataMutex_);
+    return modemEnded_;
 }
 
 } // namespace voipmodem

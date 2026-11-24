@@ -9,12 +9,18 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VoIPModem", "src\App\VoIPMo
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VoIPModem.Tests", "tests\VoIPModem.Tests.vcxproj", "{111C838D-6816-4574-A18F-E70C67064C8D}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libv90modem", "third_party\libv90modem-build\libv90modem.vcxproj", "{6B1E2C3A-9D4F-4E7A-8B21-5C0F3A9D7E11}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
 		Release|x64 = Release|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6B1E2C3A-9D4F-4E7A-8B21-5C0F3A9D7E11}.Debug|x64.ActiveCfg = Debug|x64
+		{6B1E2C3A-9D4F-4E7A-8B21-5C0F3A9D7E11}.Debug|x64.Build.0 = Debug|x64
+		{6B1E2C3A-9D4F-4E7A-8B21-5C0F3A9D7E11}.Release|x64.ActiveCfg = Release|x64
+		{6B1E2C3A-9D4F-4E7A-8B21-5C0F3A9D7E11}.Release|x64.Build.0 = Release|x64
 		{FF845D14-9AF0-4C28-B403-D3248D94AECF}.Debug|x64.ActiveCfg = Debug|x64
 		{FF845D14-9AF0-4C28-B403-D3248D94AECF}.Debug|x64.Build.0 = Debug|x64
 		{FF845D14-9AF0-4C28-B403-D3248D94AECF}.Release|x64.ActiveCfg = Release|x64

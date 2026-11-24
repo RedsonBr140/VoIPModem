@@ -123,9 +123,17 @@ public:
             }
 
             if (!audioBridge_) {
+                bool alaw = false; // the modem must know the codec's law (V.90/V.92 PCM especially)
+                try {
+                    const pj::StreamInfo si = getStreamInfo(i);
+                    alaw = si.codecName.rfind("PCMA", 0) == 0;
+                    impl_.logger_.Info("Call audio codec: " + si.codecName);
+                } catch (const pj::Error&) {
+                }
                 try {
                     audioBridge_ = std::make_unique<CallAudioBridge>(callingParty_, impl_.logger_,
-                                                                      impl_.enableV34Probing_, impl_.enableLocalAudio_);
+                                                                      impl_.enableV34Probing_, impl_.enableLocalAudio_,
+                                                                      alaw);
                     audioBridge_->Start(*audioMedia);
                 } catch (const pj::Error& err) {
                     impl_.logger_.Error("Failed to start tone-probe audio bridge: " + err.info());
