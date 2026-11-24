@@ -34,24 +34,33 @@ or later). A distributed VoIPModem binary is therefore under GPL-2.0.
 ## Build
 
 Requires Visual Studio with the C++ desktop workload (MSVC toolset
-`v145`, or change `PlatformToolset` in the `.vcxproj` files to yours).
-Only `x64` is configured.
+`v145`, or pass `/p:PlatformToolset=` with yours). Platforms: `x64` and
+`Win32` (32-bit). These builds need Windows Vista or later; Windows XP and
+Server 2003 need a separate build (see `docs/ROADMAP.md`, Phase 6).
 
-**One-time setup** (PJSIP is built from source with its own solution):
+**One-time setup** (PJSIP is built from source with its own solution;
+build the platforms and configurations you need):
 
 ```powershell
 git submodule update --init --recursive
 .\scripts\setup-pjproject.ps1
-msbuild third_party\pjproject\pjproject-vs14.sln /t:libpjproject /p:Configuration=Debug-Static /p:Platform=x64 /p:PlatformToolset=v145
 msbuild third_party\pjproject\pjproject-vs14.sln /t:libpjproject /p:Configuration=Release-Static /p:Platform=x64 /p:PlatformToolset=v145
+msbuild third_party\pjproject\pjproject-vs14.sln /t:libpjproject /p:Configuration=Release-Static /p:Platform=Win32 /p:PlatformToolset=v145
 ```
+
+(`Debug-Static` for Debug builds.)
 
 **Then build VoIPModem** (this also builds libv90modem, which is a
-project in the same solution):
+project in the same solution). Output goes to `<Platform>\<Configuration>\`
+at the repository root, e.g. `Win32\Release\VoIPModem.exe`:
 
 ```
-msbuild VoIPModem.sln /p:Configuration=Debug /p:Platform=x64
+msbuild VoIPModem.sln /p:Configuration=Release /p:Platform=x64
+msbuild VoIPModem.sln /p:Configuration=Release /p:Platform=Win32
 ```
+
+Shared build settings (output folders, PJSIP paths and library names) live
+in `build/VoIPModem.props`, which every project imports.
 
 ## Run
 
@@ -90,12 +99,13 @@ real modems, are tested by hand; `docs/ROADMAP.md` records what has been.
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` builds Debug and Release on GitHub's
-`windows-2022` runner and runs the tests on every push and pull request;
-the Release binary is kept as an artifact. The runner has Visual Studio
+`.github/workflows/ci.yml` builds Debug and Release for x64 and Win32 on
+GitHub's `windows-2022` runner and runs the tests on every push and pull
+request; the Release binaries are kept as artifacts. The runner has Visual Studio
 2022, so CI overrides the projects' `v145` toolset with `v143`. pjproject's
 build is cached by submodule commit, toolset, configuration and
 `config_site.h`. Pushing a `v*` tag runs `release.yml`, which publishes a
-GitHub release with a zip of the binary, the sample config and the
-licence texts of libv90modem and PJSIP. Dependabot proposes weekly
+GitHub release with a zip per platform (`win-x64`, `win-x86`), each with
+the binary, the sample config and the licence texts of libv90modem and
+PJSIP. Dependabot proposes weekly
 updates to the actions and both submodules.

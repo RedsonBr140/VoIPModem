@@ -11,7 +11,7 @@ just coded. `ARCHITECTURE.md` describes how each part works.
 | 3. RTP audio | **Complete**, verified live; media path retuned for modems in Phase 4 |
 | 4. Modem interoperability | **In progress**: real data links at up to V.90 with a SIP softmodem; physical analog modem not yet tested |
 | 5. Windows networking (RAS/PPP) | Not started |
-| 6. Compatibility and optimization | Not started |
+| 6. Compatibility and optimization | **Started**: x64 + Win32 builds; XP/2003 build next |
 
 ## Phase 1 — Serial modem skeleton — complete
 
@@ -146,13 +146,31 @@ VoIPModem. The work is configuring RAS on those modem ports and proving a
 full dial-up session (the legacy client dialling in and exchanging IP
 traffic).
 
-## Phase 6 — Compatibility and optimization — not started
+## Phase 6 — Compatibility and optimization — started
 
-Includes: more modems (physical and soft), Windows Server 2003 deployment
-(the current build is x64 with the v145 toolset, which is not expected
-to produce binaries that run there: this needs its own evaluation), a dedicated virtual COM
-driver if com0com proves insufficient, and installation and
-troubleshooting documentation.
+Includes: more modems (physical and soft), Windows XP and Server 2003
+deployment, a dedicated virtual COM driver if com0com proves
+insufficient, and installation and troubleshooting documentation.
+
+**Windows targets.** Targets are 32-bit and 64-bit Windows, including XP
+and Server 2003, with separate binaries (and third-party library
+versions) per Windows generation where needed.
+
+- **Done: modern build, x64 and Win32.** Both build with no warnings and
+  pass all tests (including libv90modem back to back) locally (v145)
+  and in CI (v143). Their PE headers require Windows 6.0 (Vista), so
+  XP (5.1) and Server 2003 (5.2) refuse to load them.
+- **Next: legacy build for XP/2003, x86 and x64**, with the `v141_xp`
+  toolset (Windows 7.1A SDK), whose output requires 5.01 (x86) / 5.02
+  (x64). Not installed on the development machine yet. Plan:
+  1. a separate pjproject checkout for it (its library names don't
+     include the toolset, so one tree can't hold both builds); PJSIP 2.17
+     still defaults to `_WIN32_WINNT` 0x0501 and guards its Vista-only
+     calls, but has not been run on XP; an older release is the fallback;
+  2. libv90modem compiled in MSVC's default C mode (v141 has no C11
+     switch);
+  3. a run on a real XP VM with com0com: start, register, answer, connect,
+     pass data. Only then into CI, if the runner image has `v141_xp`.
 
 ## Recommended next step
 

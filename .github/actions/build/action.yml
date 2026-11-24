@@ -5,6 +5,9 @@ description: >
   submodules.
 
 inputs:
+  platform:
+    description: x64 or Win32
+    required: true
   configuration:
     description: Debug or Release
     required: true
@@ -33,7 +36,7 @@ runs:
       run: |
         $sha = git rev-parse HEAD:third_party/pjproject
         $cfg = (Get-FileHash third_party/pjsip-config/config_site.h -Algorithm SHA256).Hash.Substring(0, 16)
-        "key=pjproject-$sha-${{ inputs.toolset }}-${{ inputs.configuration }}-$cfg" >> $env:GITHUB_OUTPUT
+        "key=pjproject-$sha-${{ inputs.toolset }}-${{ inputs.platform }}-${{ inputs.configuration }}-$cfg" >> $env:GITHUB_OUTPUT
 
     - name: Restore pjproject build
       id: pjcache
@@ -42,23 +45,23 @@ runs:
         path: third_party/pjproject/lib
         key: ${{ steps.pjkey.outputs.key }}
 
-    - name: Build pjproject (libpjproject, ${{ inputs.configuration }}-Static)
+    - name: Build pjproject (libpjproject, ${{ inputs.platform }} ${{ inputs.configuration }}-Static)
       if: steps.pjcache.outputs.cache-hit != 'true'
       shell: pwsh
       run: >
         msbuild third_party/pjproject/pjproject-vs14.sln
         /t:libpjproject
         /p:Configuration=${{ inputs.configuration }}-Static
-        /p:Platform=x64
+        /p:Platform=${{ inputs.platform }}
         /p:PlatformToolset=${{ inputs.toolset }}
         /m /v:minimal /nologo
 
     # Builds libv90modem, VoIPModemLib, VoIPModem and VoIPModem.Tests.
-    - name: Build VoIPModem.sln (${{ inputs.configuration }})
+    - name: Build VoIPModem.sln (${{ inputs.platform }} ${{ inputs.configuration }})
       shell: pwsh
       run: >
         msbuild VoIPModem.sln
         /p:Configuration=${{ inputs.configuration }}
-        /p:Platform=x64
+        /p:Platform=${{ inputs.platform }}
         /p:PlatformToolset=${{ inputs.toolset }}
         /m /v:minimal /nologo

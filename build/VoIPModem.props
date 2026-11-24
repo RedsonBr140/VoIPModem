@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Shared settings for every VoIPModem project (VoIPModemLib, VoIPModem,
+  VoIPModem.Tests, libv90modem). Imported right after Microsoft.Cpp.props,
+  so $(Platform) and $(Configuration) are known.
+
+  - One output folder per platform/configuration at the repo root
+    (x64\Release, Win32\Release, ...), whether a project is built through
+    the solution or on its own.
+  - PJSIP's location, include paths and library name. pjproject names its
+    static library by CPU, platform and configuration only
+    (libpjproject-<cpu>-<platform>-vc14-<config>-Static.lib, "vc14" fixed
+    whatever the toolset), so a build for another Windows target must come
+    from a separate pjproject tree: set PjRoot for it.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <VoIPModemRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\'))</VoIPModemRoot>
+    <OutDir>$(VoIPModemRoot)$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+
+    <PjRoot Condition="'$(PjRoot)'==''">$(VoIPModemRoot)third_party\pjproject\</PjRoot>
+    <PjCpu Condition="'$(Platform)'=='x64'">x86_64</PjCpu>
+    <PjCpu Condition="'$(Platform)'=='Win32'">i386</PjCpu>
+    <PjLib>libpjproject-$(PjCpu)-$(Platform)-vc14-$(Configuration)-Static.lib</PjLib>
+    <PjIncludes>$(PjRoot)pjlib\include;$(PjRoot)pjlib-util\include;$(PjRoot)pjmedia\include;$(PjRoot)pjnath\include;$(PjRoot)pjsip\include</PjIncludes>
+  </PropertyGroup>
+
+  <!-- Used by the two executables; static libraries ignore <Link>. -->
+  <ItemDefinitionGroup>
+    <Link>
+      <AdditionalLibraryDirectories>$(PjRoot)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(PjLib);ws2_32.lib;wsock32.lib;ole32.lib;dsound.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+</Project>

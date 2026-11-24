@@ -13,9 +13,17 @@ env:
   TOOLSET: v143     # see ci.yml
 
 jobs:
-  release:
+  build:
+    name: build ${{ matrix.platform }}
     runs-on: windows-2022
     timeout-minutes: 60
+    strategy:
+      matrix:
+        include:
+          - platform: x64
+            label: win-x64
+          - platform: Win32
+            label: win-x86
 
     steps:
       - uses: actions/checkout@v4
@@ -24,37 +32,51 @@ jobs:
 
       - uses: ./.github/actions/build
         with:
+          platform: ${{ matrix.platform }}
           configuration: Release
           toolset: ${{ env.TOOLSET }}
 
       - name: Run tests
         shell: pwsh
-        run: ./x64/Release/VoIPModem.Tests.exe
+        run: ./${{ matrix.platform }}/Release/VoIPModem.Tests.exe
 
       # The binary links libv90modem (GPL-2.0-only) and PJSIP (GPL-2.0 or
       # later), so their licence texts ship with it.
       - name: Package
-        id: package
         shell: pwsh
         run: |
-          $name = "VoIPModem-${{ github.ref_name }}-win-x64"
+          $name = "VoIPModem-${{ github.ref_name }}-${{ matrix.label }}"
           $dir = "dist/$name"
           New-Item -ItemType Directory -Force "$dir/licenses" | Out-Null
-          Copy-Item x64/Release/VoIPModem.exe $dir
+          Copy-Item ${{ matrix.platform }}/Release/VoIPModem.exe $dir
           Copy-Item config/voipmodem.ini.sample $dir
           Copy-Item README.md $dir
           Copy-Item third_party/libv90modem/LICENSE "$dir/licenses/libv90modem-LICENSE.txt"
           Copy-Item third_party/pjproject/COPYING "$dir/licenses/pjproject-COPYING.txt"
           Compress-Archive -Path "$dir/*" -DestinationPath "dist/$name.zip"
-          "zip=dist/$name.zip" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.label }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
 
       - name: Publish GitHub release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create "${{ github.ref_name }}"
-          "${{ steps.package.outputs.zip }}"
+          gh release create "${{ github.ref_name }}" dist/*.zip
+          --repo "${{ github.repository }}"
           --title "VoIPModem ${{ github.ref_name }}"
           --generate-notes
           --verify-tag

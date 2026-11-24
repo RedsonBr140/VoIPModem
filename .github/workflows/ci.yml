@@ -20,12 +20,13 @@ env:
 
 jobs:
   build-and-test:
-    name: ${{ matrix.configuration }}
+    name: ${{ matrix.platform }} ${{ matrix.configuration }}
     runs-on: windows-2022
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
+        platform: [x64, Win32]
         configuration: [Debug, Release]
 
     steps:
@@ -35,6 +36,7 @@ jobs:
 
       - uses: ./.github/actions/build
         with:
+          platform: ${{ matrix.platform }}
           configuration: ${{ matrix.configuration }}
           toolset: ${{ env.TOOLSET }}
 
@@ -43,15 +45,15 @@ jobs:
       # loading and two libv90modem instances connected back to back.
       - name: Run tests
         shell: pwsh
-        run: ./x64/${{ matrix.configuration }}/VoIPModem.Tests.exe
+        run: ./${{ matrix.platform }}/${{ matrix.configuration }}/VoIPModem.Tests.exe
 
       - name: Upload binaries
         if: matrix.configuration == 'Release'
         uses: actions/upload-artifact@v4
         with:
-          name: VoIPModem-x64-Release-${{ github.sha }}
+          name: VoIPModem-${{ matrix.platform }}-Release-${{ github.sha }}
           path: |
-            x64/Release/VoIPModem.exe
+            ${{ matrix.platform }}/Release/VoIPModem.exe
             config/voipmodem.ini.sample
           if-no-files-found: error
           retention-days: 14

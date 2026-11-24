@@ -54,6 +54,8 @@ third_party/
   pjsip-config/            VoIPModem's config_site.h for pjproject
   libv90modem/             libv90modem 0.6.0, git submodule (GPL-2.0-only)
   libv90modem-build/       libv90modem.vcxproj: MSVC build of the submodule
+build/
+  VoIPModem.props          Imported by every project: output folders, PJSIP paths and library name
 scripts/
   setup-pjproject.ps1      One-time setup: init the pjproject submodule + place config_site.h
 ```
