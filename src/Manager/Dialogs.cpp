@@ -112,6 +112,28 @@ INT_PTR CALLBACK ConnectProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
     return FALSE;
 }
 
+// While a dialog's request is with the service: OK greyed and relabelled,
+// so it can't be sent twice. Cancel stays available.
+void BeginSaving(HWND dlg, const wchar_t* label) {
+    SetDlgItemTextW(dlg, IDOK, label);
+    EnableWindow(GetDlgItem(dlg, IDOK), FALSE);
+    SetCursor(LoadCursor(nullptr, IDC_WAIT));
+}
+
+void EndSaving(HWND dlg, const wchar_t* label) {
+    SetDlgItemTextW(dlg, IDOK, label);
+    EnableWindow(GetDlgItem(dlg, IDOK), TRUE);
+    SetCursor(LoadCursor(nullptr, IDC_ARROW));
+}
+
+// The line field a refusal from the service is about, to put the cursor there.
+int FieldForError(const std::string& error) {
+    if (error.find("COM") != std::string::npos || error.find("port") != std::string::npos) return IDC_LN_COM;
+    if (error.find("extension") != std::string::npos) return IDC_LN_EXT;
+    if (error.find("name") != std::string::npos) return IDC_LN_NAME;
+    return IDC_LN_EXT;
+}
+
 // ---------------------------------------------------------------- line
 
 INT_PTR CALLBACK LineProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
@@ -205,11 +227,33 @@ INT_PTR CALLBACK LineProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                 out["inService"] = IsChecked(dlg, IDC_LN_INSERVICE);
                 out["errorControl"] = IsChecked(dlg, IDC_LN_V42);
                 out["compression"] = IsChecked(dlg, IDC_LN_COMP);
-                d->out = out;
-                EndDialog(dlg, IDOK);
+                // Send it from here and wait: the dialog closes only once
+                // the service has accepted the line.
+                BeginSaving(dlg, d->isNew ? L"Adding the line…" : L"Saving…");
+                if (d->isNew) {
+                    d->client->Request(dlg, "line.add", {{"line", out}});
+                } else {
+                    d->client->Request(dlg, "line.update", {{"id", d->id}, {"line", out}});
+                }
             } else if (LOWORD(wp) == IDCANCEL) {
                 EndDialog(dlg, IDCANCEL);
             }
+            return TRUE;
+        case WM_APP_RESPONSE: {
+            std::unique_ptr<Response> r(reinterpret_cast<Response*>(lp));
+            if (r->ok) {
+                d->result = r->result;
+                EndDialog(dlg, IDOK);
+            } else {
+                EndSaving(dlg, d->isNew ? L"Create" : L"OK");
+                Error(dlg, L"The service did not accept the line:\r\n" + Widen(r->error) +
+                               L"\r\n\r\nCorrect it and press " + (d->isNew ? L"Create" : L"OK") + L" again.");
+                SetFocus(GetDlgItem(dlg, FieldForError(r->error)));
+            }
+            return TRUE;
+        }
+        case WM_APP_CONNECTION:
+            delete reinterpret_cast<ConnectionInfo*>(lp);
             return TRUE;
     }
     return FALSE;
@@ -220,7 +264,8 @@ INT_PTR CALLBACK LineProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
 struct SettingsState {
     const Json* config;
     int tab;
-    Json* changes;
+    ControlClient* client;
+    Json* result;
 };
 
 void ShowPage(HWND dlg, int page) {
@@ -410,9 +455,28 @@ INT_PTR CALLBACK SettingsProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp) {
                         return TRUE;
                     }
                 }
-                *st->changes = changes;
+                if (changes.empty()) {
+                    EndDialog(dlg, IDCANCEL); // nothing to save
+                    return TRUE;
+                }
+                BeginSaving(dlg, L"Saving…");
+                st->client->Request(dlg, "config.set", changes);
             }
-            EndDialog(dlg, IDOK);
+            return TRUE;
+        case WM_APP_RESPONSE: {
+            std::unique_ptr<Response> r(reinterpret_cast<Response*>(lp));
+            if (r->ok) {
+                *st->result = r->result;
+                EndDialog(dlg, IDOK);
+            } else {
+                EndSaving(dlg, L"OK");
+                Error(dlg, L"The service did not accept the settings:\r\n" + Widen(r->error) +
+                               L"\r\n\r\nNothing was saved. Correct it and press OK again.");
+            }
+            return TRUE;
+        }
+        case WM_APP_CONNECTION:
+            delete reinterpret_cast<ConnectionInfo*>(lp);
             return TRUE;
     }
     return FALSE;
@@ -807,8 +871,8 @@ bool ShowLineDialog(HWND owner, LineDialogData& data) {
            IDOK;
 }
 
-bool ShowSettingsDialog(HWND owner, const Json& config, int tab, Json& changes) {
-    SettingsState st{&config, tab, &changes};
+bool ShowSettingsDialog(HWND owner, const Json& config, int tab, ControlClient& client, Json& result) {
+    SettingsState st{&config, tab, &client, &result};
     return DialogBoxParamW(Instance(), MAKEINTRESOURCEW(IDD_SETTINGS), owner, SettingsProc,
                            reinterpret_cast<LPARAM>(&st)) == IDOK;
 }

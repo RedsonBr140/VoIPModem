@@ -49,12 +49,10 @@ enum Tag : WPARAM {
     TagLog,
     TagAction,          // show the error, if any; poll again
     TagSettingsConfig,  // high word: tab
-    TagSettingsSaved,
     TagNewLineConfig,
     TagNewLinePorts,
     TagEditLineConfig,
     TagEditLinePorts,
-    TagLineSaved,
     TagRemove,
     TagRestart,
     TagStop,
@@ -132,6 +130,7 @@ private:
     void StartService();
     void InstallService();
     void OpenLineDialog(bool isNew, const Json& config, const Json& ports);
+    void AskRestart(const Json& result);
 
     void LoadSettings();
     void SaveSettings();
@@ -902,6 +901,19 @@ void MainWindow::OnDrawItem(DRAWITEMSTRUCT* di) {
 }
 
 LRESULT MainWindow::OnNotify(NMHDR* hdr) {
+    if (hdr->hwndFrom == toolbar_ && hdr->code == NM_CUSTOMDRAW) {
+        // A flat toolbar is transparent: it expects its parent to have
+        // painted the background, but this window clips its children
+        // (WS_CLIPCHILDREN) and paints nothing there. Clear it here, or
+        // each redraw lands on the last one and the labels smear.
+        auto* cd = reinterpret_cast<NMTBCUSTOMDRAW*>(hdr);
+        if (cd->nmcd.dwDrawStage == CDDS_PREPAINT) {
+            RECT rc;
+            GetClientRect(toolbar_, &rc);
+            FillRect(cd->nmcd.hdc, &rc, GetSysColorBrush(COLOR_BTNFACE));
+        }
+        return CDRF_DODEFAULT;
+    }
     if (hdr->hwndFrom == list_) {
         switch (hdr->code) {
             case LVN_GETDISPINFOW: {
@@ -1224,16 +1236,26 @@ void MainWindow::OpenLineDialog(bool isNew, const Json& config, const Json& port
         }
         if (data.config.is_null()) return;
     }
+    data.id = id;
+    data.client = &client_;
     ++modal_;
-    const bool ok = ShowLineDialog(hwnd_, data);
+    const bool saved = ShowLineDialog(hwnd_, data); // sends the request itself; true once accepted
     --modal_;
-    if (!ok) return;
-    if (isNew) {
-        SetHint(L"Adding the line…");
-        client_.Request(hwnd_, "line.add", {{"line", data.out}}, MakeTag(TagLineSaved));
-    } else {
-        SetHint(L"Saving the line…");
-        client_.Request(hwnd_, "line.update", {{"id", id}, {"line", data.out}}, MakeTag(TagLineSaved));
+    if (!saved) return;
+    SetHint(JBool(data.result, "deferred") ? L"Saved; the line is in a call and takes the new settings when it ends"
+                                           : (isNew ? L"Line added" : L"Line saved"));
+    if (data.result.contains("id")) selectedId_ = JStr(data.result, "id");
+    AskRestart(data.result);
+    Poll();
+}
+
+void MainWindow::AskRestart(const Json& result) {
+    if (JBool(result, "restartRequired") &&
+        MessageBoxW(hwnd_,
+                    L"Saved. Some of these settings (SIP transport, audio path, control API) take effect "
+                    L"when the service restarts. Restart it now?",
+                    L"VoIPModem settings", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+        client_.Request(hwnd_, "service.restart", Json::object(), MakeTag(TagRestart));
     }
 }
 
@@ -1250,17 +1272,6 @@ void MainWindow::OnResponse(WPARAM wp, Response* r) {
         }
         return true;
     };
-    auto askRestart = [&](const Json& result) {
-        if (JBool(result, "restartRequired")) {
-            if (MessageBoxW(hwnd_,
-                            L"Saved. Some of these settings (SIP transport, audio path, control API) take effect "
-                            L"when the service restarts. Restart it now?",
-                            L"VoIPModem settings", MB_YESNO | MB_ICONQUESTION) == IDYES) {
-                client_.Request(hwnd_, "service.restart", Json::object(), MakeTag(TagRestart));
-            }
-        }
-    };
-
     switch (tag) {
         case TagStatus:
             if (r->ok) ApplyStatus(r->result);
@@ -1287,22 +1298,17 @@ void MainWindow::OnResponse(WPARAM wp, Response* r) {
             break;
         case TagSettingsConfig: {
             if (failed(L"Could not read the settings")) break;
-            Json changes;
+            Json result;
             ++modal_;
-            const bool ok = ShowSettingsDialog(hwnd_, r->result, extra, changes);
+            const bool saved = ShowSettingsDialog(hwnd_, r->result, extra, client_, result); // true once accepted
             --modal_;
-            if (ok && !changes.empty()) {
-                SetHint(L"Saving settings…");
-                client_.Request(hwnd_, "config.set", changes, MakeTag(TagSettingsSaved));
+            if (saved) {
+                SetHint(L"Settings saved to voipmodem.ini");
+                AskRestart(result);
+                Poll();
             }
             break;
         }
-        case TagSettingsSaved:
-            if (failed(L"Could not save the settings")) break;
-            SetHint(L"Settings saved to voipmodem.ini");
-            askRestart(r->result);
-            Poll();
-            break;
         case TagNewLineConfig:
         case TagEditLineConfig:
             pendingConfig_ = r->ok ? r->result : Json();
@@ -1315,14 +1321,6 @@ void MainWindow::OnResponse(WPARAM wp, Response* r) {
                 OpenLineDialog(tag == TagNewLinePorts, pendingConfig_, r->ok ? r->result : Json::object());
             }
             pendingConfig_ = Json();
-            break;
-        case TagLineSaved:
-            if (failed(L"Could not save the line")) break;
-            SetHint(JBool(r->result, "deferred") ? L"Saved; the line is in a call and takes the new settings when it ends"
-                                                 : L"Line saved");
-            if (r->result.contains("id")) selectedId_ = JStr(r->result, "id");
-            askRestart(r->result);
-            Poll();
             break;
         case TagRemove:
             if (!r->ok && r->error.find("in a call") != std::string::npos) {

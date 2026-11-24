@@ -24,22 +24,29 @@ bool ShowConnectDialog(HWND owner, std::string& host, int& port, std::string& pa
 // New line (isNew) or line properties. `config` is the line's entry from
 // "config.get" (empty for a new line), `defaults` that answer's
 // "defaults", `ports` the COM ports the service's computer has, `driver`
-// the status' "driver" text. On OK, `out` is the "line" object to send
-// with line.add / line.update.
+// the status' "driver" text, `id` the line being edited. On OK the dialog
+// itself sends line.add / line.update through `client` and stays open
+// until the service accepts it: if it refuses, the error is shown and
+// everything typed is still there. Returns true once saved; `result` is
+// the service's answer.
 struct LineDialogData {
     bool isNew = true;
+    std::string id;
     Json config;
     Json defaults;
     std::vector<std::string> ports;
     std::string driver;
-    Json out;
+    ControlClient* client = nullptr;
+    Json result;
 };
 bool ShowLineDialog(HWND owner, LineDialogData& data);
 
 // Settings, from a "config.get" answer, opened on `tab` (0 SIP, 1 audio,
-// 2 modem defaults, 3 logging, 4 control API). On OK, `changes` holds the
-// "config.set" arguments (only what changed).
-bool ShowSettingsDialog(HWND owner, const Json& config, int tab, Json& changes);
+// 2 modem defaults, 3 logging, 4 control API). On OK it sends
+// "config.set" (only what changed) and, like the line dialog, stays open
+// on an error. Returns true once saved (`result` = the answer), false on
+// Cancel or when nothing changed.
+bool ShowSettingsDialog(HWND owner, const Json& config, int tab, ControlClient& client, Json& result);
 
 void ShowSelfTestDialog(HWND owner, ControlClient& client);
 void ShowPortsDialog(HWND owner, ControlClient& client, bool drivers);
