@@ -16,6 +16,15 @@ class Endpoint;
 
 namespace voipmodem {
 
+// The process-wide SIP and media settings (AppConfig [SIP] / [Media]).
+struct EndpointSettings {
+    int localPort = 5060;
+    std::string transport = "UDP";       // UDP or TCP
+    std::string preferredCodec = "PCMU"; // PCMU or PCMA, offered first
+    int jitterBufferMs = 160;
+    bool echoCanceller = false;
+};
+
 // Process-wide PJSIP library instance. There is exactly one of these for
 // the whole application — pjsua2's Endpoint is a singleton in practice —
 // shared by every ModemInstance's PjsipCallController, each of which
@@ -30,9 +39,9 @@ public:
     PjsipEndpoint(const PjsipEndpoint&) = delete;
     PjsipEndpoint& operator=(const PjsipEndpoint&) = delete;
 
-    // Creates the UDP transport on `localPort` and starts the library.
-    // Returns false (and logs why) on failure. Call once at startup.
-    bool Start(int localPort);
+    // Creates the SIP transport and starts the library. Returns false
+    // (and logs why) on failure. Call once at startup.
+    bool Start(const EndpointSettings& settings);
 
     // Must be called once on any thread that will create accounts/calls
     // or otherwise touch pjsua2 objects, other than the thread that
@@ -42,13 +51,16 @@ public:
 
     pj::Endpoint& Raw();
 
+    // "2.17" and so on.
+    std::string LibraryVersion();
+
 private:
     // Disables every codec except PCMU/PCMA (G.711): per
     // docs/PROJECT_SPEC.md section 4.E/D, modem tones must travel over an
     // uncompressed G.711 path, never a lossy voice codec (Opus/Speex/GSM/
     // iLBC/...) that would corrupt them. Applied process-wide, after
     // libStart(), since PJSIP's codec priority table isn't per-account.
-    void RestrictCodecsToG711();
+    void RestrictCodecsToG711(const std::string& preferred);
 
     Logger& logger_;
     std::unique_ptr<pj::Endpoint> endpoint_;

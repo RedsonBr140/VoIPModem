@@ -11,9 +11,24 @@ up to V.34 and V.90/V.92, with V.42 error control and V.42bis/V.44
 compression. The resulting data stream is what the COM port carries, so
 Windows' own modem driver and RAS can use the line like a hardware modem.
 
+Two programs:
+
+- **`VoIPModem.exe`**, the modem bank. It runs headless, in a console or
+  as a Windows service, and serves a small control API (JSON over TCP,
+  localhost by default).
+- **`VoIPModemManager.exe`** (VoIPModem Manager), the operator's window:
+  every line's state, caller, modulation and rates, call statistics,
+  the event log; answer, hang up, reset, take lines out of service, add
+  and edit lines and settings. It talks only to the API, so the service
+  runs without it, and it can manage a service on another computer.
+
+Docs:
+
 - `docs/PROJECT_SPEC.md`: requirements and goals.
 - `docs/ARCHITECTURE.md`: how it works.
+- `docs/CONTROL_API.md`: the control API, for the Manager or your own scripts.
 - `docs/ROADMAP.md`: phase status and test results.
+- `docs/design/`: the Manager's design mock-up.
 
 ## Status
 
@@ -23,13 +38,17 @@ links work: answering, VoIPModem connected at **V.90 56000/26400** with
 V.42 LAPM and V.44 compression; calling, at **V.34 31200/14400** and V.21.
 Those tests used a SIP software modem (BinModem) as the far end. A
 physical analog modem through the FXS gateway has not been tried yet,
-and V.92 does not connect yet. RAS/PPP (Phase 5) is not started. Details
-in `docs/ROADMAP.md`.
+and V.92 does not connect yet. RAS/PPP (Phase 5) is not started. The
+service mode, control API and Manager are new: built and tested here
+(unit tests, the API end to end, the Manager driven against a running
+service), not yet through a live modem call. Details in `docs/ROADMAP.md`.
 
 ## Licence
 
 VoIPModem links libv90modem, which is GPL-2.0-only, and PJSIP (GPL-2.0
 or later). A distributed VoIPModem binary is therefore under GPL-2.0.
+VoIPModem and the Manager also use JSON for Modern C++ (MIT,
+`third_party/nlohmann`).
 
 ## Build
 
@@ -51,8 +70,9 @@ msbuild third_party\pjproject\pjproject-vs14.sln /t:libpjproject /p:Configuratio
 (`Debug-Static` for Debug builds.)
 
 **Then build VoIPModem** (this also builds libv90modem, which is a
-project in the same solution). Output goes to `<Platform>\<Configuration>\`
-at the repository root, e.g. `Win32\Release\VoIPModem.exe`:
+project in the same solution, and the Manager). Output goes to
+`<Platform>\<Configuration>\` at the repository root, e.g.
+`Win32\Release\VoIPModem.exe` and `Win32\Release\VoIPModemManager.exe`:
 
 ```
 msbuild VoIPModem.sln /p:Configuration=Release /p:Platform=x64
@@ -90,12 +110,29 @@ configuration is in `build/VoIPModem.Toolset.props`.
    line's `ComPort`, and `[SIP] LocalPort` plus each line's `SipServer`,
    `SipExtension` and `SipPassword`. **Never commit real credentials**:
    `voipmodem.ini` is gitignored for that reason.
-3. Run `VoIPModem.exe [path-to-ini]`. Stop with Ctrl+C.
+3. Run it, either way:
+   - **In a console**: `VoIPModem.exe [path-to-ini]`. Stop with Ctrl+C.
+   - **As a Windows service** (starts with Windows, no one logged on):
+     from an administrator prompt, `VoIPModem.exe --install [path-to-ini]`
+     (default: `voipmodem.ini` next to the exe), then
+     `net start VoIPModem`. `VoIPModem.exe --uninstall` removes it. The
+     Manager's File menu can install, start, stop and restart it too.
 4. Use the line from the modem-driver side: RAS, or a terminal on the
    paired COM port. `ATDT<extension>` dials; `ATA` or `ATS0=<n>` answers.
    `CONNECT <rate>` means the modem link is up; after that the port
    carries data. `+++` (with a second of silence before and after)
    returns to command mode, and `ATH` hangs up.
+
+**VoIPModem Manager**: start `VoIPModemManager.exe`. It connects to
+127.0.0.1:7880 (File > Connect to service for another computer, port or
+password) and refreshes once a second. Select a line to answer, hang up,
+reset it or take it out of service; Modem > New modem line adds one;
+Tools > Settings edits `voipmodem.ini` (comments are kept) and applies
+the change to idle lines, or asks to restart the service for the SIP
+transport, audio path and control API settings. Tools also has the
+com0com pairs and modem drivers on the service's computer, a loopback
+self-test of the modem engine, the SIP trace, and an AT console for the
+modem side of a pair.
 
 To see what a call is doing, set `[Logging] Level=Debug`: the log then
 has the SIP trace, the modem's connect line (mode, rates, SNR, round
@@ -110,9 +147,12 @@ x64\Debug\VoIPModem.Tests.exe
 
 A small hand-rolled framework (`tests/TestFramework.h`), no external
 dependency. It covers the Hayes parser, the state machine (with a fake
-call controller), config loading, and the MSVC build of libv90modem (two
-modems connected back to back). Calls through real SIP, and links with
-real modems, are tested by hand; `docs/ROADMAP.md` records what has been.
+call controller), config loading and the ini writer, the control API
+server (over a real loopback socket, password included), the call
+statistics, com0com pairing, and the MSVC build of libv90modem (two
+modems connected back to back). Calls through real SIP, links with real
+modems, and the Manager's window are tested by hand; `docs/ROADMAP.md`
+records what has been.
 
 ## Continuous integration
 
@@ -123,6 +163,6 @@ request; the Release binaries are kept as artifacts. The runner has Visual Studi
 build is cached by submodule commit, toolset, configuration and
 `config_site.h`. Pushing a `v*` tag runs `release.yml`, which publishes a
 GitHub release with a zip per platform (`win-x64`, `win-x86`), each with
-the binary, the sample config and the licence texts of libv90modem and
-PJSIP. Dependabot proposes weekly
+both programs, the sample config and the licence texts of libv90modem,
+PJSIP and JSON for Modern C++. Dependabot proposes weekly
 updates to the actions and both submodules.

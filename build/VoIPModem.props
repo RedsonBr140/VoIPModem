@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Shared settings for every VoIPModem project (VoIPModemLib, VoIPModem,
-  VoIPModem.Tests, libv90modem). Imported right after Microsoft.Cpp.props,
+  VoIPModemManager, VoIPModem.Tests, libv90modem). Imported right after Microsoft.Cpp.props,
   so $(Platform) and $(Configuration) are known.
 
   - One output folder per platform/configuration at the repo root
@@ -36,8 +36,19 @@
     <PjIncludes>$(PjRoot)pjlib\include;$(PjRoot)pjlib-util\include;$(PjRoot)pjmedia\include;$(PjRoot)pjnath\include;$(PjRoot)pjsip\include</PjIncludes>
   </PropertyGroup>
 
-  <!-- Used by the two executables; static libraries ignore <Link>. -->
+  <!-- third_party: <nlohmann/json.hpp> (vendored, MIT) for the control API.
+       /utf-8: the sources are UTF-8 (the Manager's texts have dashes and
+       symbols); without it MSVC reads them in the system code page. -->
   <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(VoIPModemRoot)third_party;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <!-- Used by the executables that link PJSIP (VoIPModem, the tests); static
+       libraries ignore <Link>. The Manager sets VoIPModemNoPjsip. -->
+  <ItemDefinitionGroup Condition="'$(VoIPModemNoPjsip)'!='true'">
     <Link>
       <AdditionalLibraryDirectories>$(PjRoot)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>$(PjLib);ws2_32.lib;wsock32.lib;ole32.lib;dsound.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>

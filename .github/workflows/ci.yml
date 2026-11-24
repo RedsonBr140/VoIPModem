@@ -54,6 +54,7 @@ jobs:
           name: VoIPModem-${{ matrix.platform }}-Release-${{ github.sha }}
           path: |
             ${{ matrix.platform }}/Release/VoIPModem.exe
+            ${{ matrix.platform }}/Release/VoIPModemManager.exe
             config/voipmodem.ini.sample
           if-no-files-found: error
           retention-days: 14

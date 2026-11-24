@@ -106,8 +106,10 @@ unsigned ParseModulations(const std::string& list, std::string& unknown) {
 } // namespace
 
 CallAudioBridge::CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableLocalAudio, bool alaw,
-                                 const std::string& modulations)
-    : callingParty_(callingParty), logger_(logger) {
+                                 const ModemOptions& options)
+    : callingParty_(callingParty), logger_(logger), errorControl_(options.errorControl),
+      compression_(options.compression) {
+    const std::string& modulations = options.modulations;
     v90m_cfg cfg;
     v90m_cfg_default(&cfg);
     cfg.role = callingParty ? V90M_ROLE_ORIGINATE : V90M_ROLE_ANSWER;
@@ -134,12 +136,20 @@ CallAudioBridge::CallAudioBridge(bool callingParty, TaggedLogger& logger, bool e
         logger_.Error("libv90modem: v90m_create failed, error " + std::to_string(err));
     }
 
-    v90m_ec_cfg ecCfg;
-    v90m_ec_cfg_default(&ecCfg, callingParty ? 1 : 0);
-    ec_ = v90m_ec_create(&ecCfg, &err);
-    if (ec_ == nullptr) {
-        logger_.Error("libv90modem: v90m_ec_create failed, error " + std::to_string(err));
+    if (errorControl_) {
+        v90m_ec_cfg ecCfg;
+        v90m_ec_cfg_default(&ecCfg, callingParty ? 1 : 0);
+        ec_ = v90m_ec_create(&ecCfg, &err);
+        if (ec_ == nullptr) {
+            logger_.Error("libv90modem: v90m_ec_create failed, error " + std::to_string(err));
+        }
+    } else {
+        async_ = v90m_async_create(&err);
+        if (async_ == nullptr) {
+            logger_.Error("libv90modem: v90m_async_create failed, error " + std::to_string(err));
+        }
     }
+    linkStatus_.active = modem_ != nullptr;
 
     if (enableLocalAudio) {
         localSpeaker_.emplace();
@@ -161,6 +171,9 @@ CallAudioBridge::~CallAudioBridge() {
     v90m_ec_destroy(ec_);
     ec_ = nullptr;
     ecActive_ = false;
+    v90m_async_destroy(async_);
+    async_ = nullptr;
+    asyncActive_ = false;
     v90m_destroy(modem_);
     modem_ = nullptr;
 }
@@ -175,17 +188,23 @@ void CallAudioBridge::Start(pj::AudioMedia& callAudio) {
 
     logger_.Info(std::string("CallAudioBridge started (") + (callingParty_ ? "calling" : "answering") +
                  "); libv90modem " + v90m_version() +
-                 " offering " + modulationsDescription_ + " with V.42" +
+                 " offering " + modulationsDescription_ +
+                 (errorControl_ ? (compression_ ? " with V.42" : " with V.42, no compression")
+                                : " without error control") +
                  (localSpeaker_.has_value() ? "; local audio monitor enabled" : ""));
 }
 
 int CallAudioBridge::ModemGetBit() {
-    return ecActive_ ? v90m_ec_tx_bit(ec_) : 1; // mark until connected
+    if (ecActive_) return v90m_ec_tx_bit(ec_);
+    if (asyncActive_) return v90m_async_getbit(async_);
+    return 1; // mark until connected
 }
 
 void CallAudioBridge::ModemPutBit(int bit) {
     if (ecActive_) {
         v90m_ec_rx_bit(ec_, bit);
+    } else if (asyncActive_) {
+        v90m_async_putbit(async_, bit);
     }
 }
 
@@ -202,8 +221,25 @@ void CallAudioBridge::OnModemEvent(int event) {
                          (st.used_v8 ? " (via V.8)" : " (no V.8)") + ", SNR " +
                          (stats.snr_db10 >= 0 ? std::to_string(stats.snr_db10 / 10.0) + " dB" : "n/a") +
                          ", round trip " + std::to_string(stats.rtd) + " samples");
+            if (!errorControl_) {
+                if (async_ != nullptr) {
+                    v90m_async_reset(async_);
+                    asyncActive_ = true;
+                    logger_.Info("libv90modem: no error control (ErrorControl=0): start-stop characters");
+                }
+                UpdateLinkStatus(false);
+                std::lock_guard<std::mutex> lock(dataMutex_);
+                connectPending_ = true;
+                connectRxBps_ = st.rx_bps;
+                break;
+            }
             v90m_ec_cfg ecCfg;
             v90m_ec_cfg_default(&ecCfg, callingParty_ ? 1 : 0);
+            if (!compression_) {
+                ecCfg.lapm.v42bis_tx = ecCfg.lapm.v42bis_rx = 0;
+                ecCfg.lapm.v44_tx = ecCfg.lapm.v44_rx = 0;
+                ecCfg.comp_policy = V90M_COMP_NEVER;
+            }
             // Deliberately NOT honouring st.odp_bypass (libv90modem's docs
             // suggest detect = 0 then). With detection on, the answerer
             // still starts LAPM on a caller's flags/SABME without an ODP
@@ -221,6 +257,7 @@ void CallAudioBridge::OnModemEvent(int event) {
             } else {
                 logger_.Error("libv90modem: V.42 endpoint reset failed; no data will flow");
             }
+            UpdateLinkStatus(false);
             std::lock_guard<std::mutex> lock(dataMutex_);
             connectPending_ = true;
             connectRxBps_ = st.rx_bps;
@@ -241,9 +278,11 @@ void CallAudioBridge::OnModemEvent(int event) {
         case V90M_EV_ENDED: {
             logger_.Info(std::string("libv90modem: modem ended -- ") + DescribeEnd(st.end));
             if (ecActive_) {
+                UpdateLinkStatus(true);
                 v90m_ec_abort(ec_);
                 ecActive_ = false;
             }
+            asyncActive_ = false;
             std::lock_guard<std::mutex> lock(dataMutex_);
             if (!endSignalled_) { endPending_ = true; endSignalled_ = true; } // once per call
             break;
@@ -272,7 +311,82 @@ void CallAudioBridge::LogErrorControlState() {
     logger_.Info(message);
 }
 
+void CallAudioBridge::PumpAsync() {
+    if (!asyncActive_) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(dataMutex_);
+    std::uint8_t chunk[256];
+    while (!txByteQueue_.empty()) {
+        size_t n = 0;
+        while (n < sizeof chunk && !txByteQueue_.empty()) {
+            chunk[n++] = txByteQueue_.front();
+            txByteQueue_.pop_front();
+        }
+        const size_t accepted = v90m_async_write(async_, chunk, n);
+        for (size_t i = n; i > accepted; --i) {
+            txByteQueue_.push_front(chunk[i - 1]);
+        }
+        if (accepted < n) break;
+    }
+    size_t got;
+    while ((got = v90m_async_read(async_, chunk, sizeof chunk)) > 0) {
+        rxByteQueue_.insert(rxByteQueue_.end(), chunk, chunk + got);
+    }
+}
+
+void CallAudioBridge::UpdateLinkStatus(bool includeErrorControl) {
+    if (modem_ == nullptr) {
+        return;
+    }
+    v90m_state st;
+    v90m_get_state(modem_, &st);
+    v90m_stats stats;
+    v90m_get_stats(modem_, &stats);
+
+    std::lock_guard<std::mutex> lock(dataMutex_);
+    ModemLinkStatus& s = linkStatus_;
+    s.active = true;
+    s.connected = st.connected != 0;
+    s.retraining = st.retraining != 0;
+    if (st.connected) {
+        s.modulation = DescribeConnection(st.modulation);
+        s.txBps = st.tx_bps;
+        s.rxBps = st.rx_bps;
+    }
+    s.snrDb10 = stats.snr_db10;
+    s.roundTripSamples = stats.rtd;
+    s.retrains = stats.retrains;
+    s.renegotiations = stats.renegotiations;
+    if (!errorControl_) {
+        s.errorControl = "none";
+        s.compression = "none";
+        if (async_ != nullptr) {
+            s.frameErrors = v90m_async_frame_errors(async_);
+        }
+    } else if (includeErrorControl && ec_ != nullptr && ecActive_) {
+        v90m_ec_status ecs;
+        v90m_ec_get_status(ec_, &ecs);
+        switch (ecs.state) {
+            case V90M_EC_DETECT: s.errorControl = "detecting"; break;
+            case V90M_EC_ESTABLISH: s.errorControl = "establishing"; break;
+            case V90M_EC_CONNECTED: s.errorControl = "V.42 LAPM"; break;
+            case V90M_EC_ASYNC: s.errorControl = "none"; break;
+            default: s.errorControl = "down"; break;
+        }
+        s.compression = ecs.state == V90M_EC_CONNECTED ? DescribeCompression(ecs.comp_alg) : "none";
+        s.frameErrors = ecs.rx_frames_bad;
+        s.retransmits = ecs.tx_i_retx;
+    }
+}
+
+ModemLinkStatus CallAudioBridge::GetLinkStatus() const {
+    std::lock_guard<std::mutex> lock(dataMutex_);
+    return linkStatus_;
+}
+
 void CallAudioBridge::PumpErrorControl(unsigned elapsedMs) {
+    PumpAsync();
     if (!ecActive_) {
         return;
     }
@@ -346,6 +460,9 @@ void CallAudioBridge::onFrameReceived(pj::MediaFrame& frame) {
     v90m_process_linear(modem_, rx.data(), pendingTxSamples_.data(), sampleCount);
 
     PumpErrorControl(static_cast<unsigned>(sampleCount * 1000 / kSampleRateHz));
+    // Status for display: modem state every frame is cheap; the V.42
+    // counters about twice a second.
+    UpdateLinkStatus(++frameCount_ % 25 == 0);
     PlayLocally(rx, pendingTxSamples_);
 }
 

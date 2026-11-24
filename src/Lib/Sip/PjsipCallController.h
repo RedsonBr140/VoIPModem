@@ -19,6 +19,13 @@ struct SipAccountConfig {
     std::string realm = "*";
     bool enableLocalAudio = false; // see ModemInstanceConfig::enableLocalAudio's own comment
     std::string modulations;       // see ModemInstanceConfig::modulations's own comment
+    bool errorControl = true;      // ModemInstanceConfig::errorControl
+    bool compression = true;       // ModemInstanceConfig::compression
+    std::string transport = "UDP"; // AppConfig::sipTransport
+    int registerExpirySeconds = 300;
+    bool registerOnStart = true;   // false: Start() creates the account unregistered
+    int rtpPort = 4000;            // first local RTP port (AppConfig::rtpPort)
+    int rtpPortRange = 0;          // 0 = no limit
 };
 
 // Real, PJSIP-backed ICallController: one SIP account (one modem
@@ -44,6 +51,9 @@ public:
     // to even start registering (e.g. malformed config) — a rejected or
     // slow registration is reported asynchronously via onRegState logging,
     // not this return value, since registration itself is async in SIP.
+    // Without a successful Start() the controller has no account: Dial()
+    // ends in NO CARRIER and no call arrives, like the stub. ModemInstance
+    // calls it once the line's COM port is open.
     bool Start();
 
     void Dial(const std::string& number) override;
@@ -52,6 +62,8 @@ public:
     CallEvent PollEvent() override;
     void SendData(const std::vector<std::uint8_t>& bytes) override;
     std::vector<std::uint8_t> PollReceivedData() override;
+    CallStatus GetStatus() override;
+    bool SetRegistered(bool registered) override;
 
     // Implementation detail exposed only so the nested pjsua2 Account/Call
     // subclasses (defined in the .cpp) can report back into this

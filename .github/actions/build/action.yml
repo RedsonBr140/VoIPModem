@@ -56,7 +56,7 @@ runs:
         /p:PlatformToolset=${{ inputs.toolset }}
         /m /v:minimal /nologo
 
-    # Builds libv90modem, VoIPModemLib, VoIPModem and VoIPModem.Tests.
+    # Builds libv90modem, VoIPModemLib, VoIPModem, VoIPModemManager and VoIPModem.Tests.
     - name: Build VoIPModem.sln (${{ inputs.platform }} ${{ inputs.configuration }})
       shell: pwsh
       run: >

@@ -3,18 +3,60 @@
 ; as the first command-line argument) and adjust as needed. See
 ; docs/ARCHITECTURE.md for what each part does.
 
+; VoIPModem Manager (Settings, Line properties, New line) edits this file
+; in place: it changes only the keys it sets and keeps comments.
+
 [Logging]
 ; One of: Error, Warn, Info, Debug. Debug includes PJSIP's own SIP/RTP
 ; trace, which is what you want when diagnosing a call.
 Level=Info
+; Relative to this file's folder.
 File=voipmodem.log
+; Rotate at this size (KB): voipmodem.log -> .1 -> ... -> .<Keep>. 0 = never.
+; RotateKB=0
+; Keep=5
+; 1 = log every AT command line and response at Info.
+; TraceAT=0
 
 ; Process-wide SIP transport. Required (nonzero) for any modem line's
 ; SipServer setting below to do anything: without it, every line falls
-; back to NullCallController (ATD/ATA honestly fail). One UDP port is
-; shared by every line's SIP account.
+; back to NullCallController (ATD/ATA honestly fail). One port is shared
+; by every line's SIP account.
 [SIP]
 LocalPort=5060
+; UDP (default) or TCP.
+; Transport=UDP
+; Default registrar for lines without their own SipServer.
+; Server=sip.example.com:5060
+; Realm=*
+; RegisterExpiry=300
+; 0 = lines start unregistered (register them from the Manager).
+; RegisterOnStart=1
+
+; The call audio path. See docs/ARCHITECTURE.md "Media path" before
+; changing these: modems are less forgiving than voice.
+; [Media]
+; PCMU (mu-law) or PCMA (A-law), offered first; both are offered.
+; Codec=PCMU
+; Initial jitter buffer depth; the others scale from it. Raise on lossy trunks.
+; JitterBufferMs=160
+; RtpPort=4000
+; RtpPortRange=0
+; EchoCanceller=0
+
+; The control API (docs/CONTROL_API.md) that VoIPModem Manager uses.
+; Port=0 turns it off. Keep BindAddress=127.0.0.1 unless the Manager runs
+; on another computer, and then set a Password (it is sent in clear text).
+; [Control]
+; Port=7880
+; BindAddress=127.0.0.1
+; Password=
+
+; Modem settings for every line that does not set its own: Modulations,
+; AutoAnswerRingCount, ErrorControl, Compression, BaudRate,
+; Identification, SipServer, SipRealm.
+; [Defaults]
+; AutoAnswerRingCount=1
 
 ; --- Single modem line ---
 ; A bare [Modem] section configures exactly one modem line.
@@ -40,6 +82,14 @@ AutoAnswerRingCount=0
 ; out (or empty) for the default: V.92, V.90, V.34, V.32bis, V.22bis,
 ; V.22 and V.21. Example, to keep calls out of V.90/V.92 PCM:
 ; Modulations=V21,V22,V32BIS,V34
+
+; V.42 error control (LAPM) and, within it, V.42bis/V.44 compression.
+; ErrorControl=0 sends plain start-stop characters instead.
+; ErrorControl=1
+; Compression=1
+
+; 0 = out of service: the extension is not registered, so no calls come in.
+; InService=1
 
 ; 1 = play the call's audio (both directions mixed), plus the dial tone
 ; and DTMF digits when dialling, on this PC's default sound output, like

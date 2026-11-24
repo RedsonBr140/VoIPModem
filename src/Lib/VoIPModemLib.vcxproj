@@ -113,6 +113,14 @@
     <ClInclude Include="Sip\PjsipEndpoint.h" />
     <ClInclude Include="Sip\PjsipCallController.h" />
     <ClInclude Include="Sip\CallAudioBridge.h" />
+    <ClInclude Include="Core\CallStatus.h" />
+    <ClInclude Include="Config\IniDocument.h" />
+    <ClInclude Include="Control\ControlServer.h" />
+    <ClInclude Include="Control\LineStatus.h" />
+    <ClInclude Include="Control\ServiceStats.h" />
+    <ClInclude Include="Control\SystemInfo.h" />
+    <ClInclude Include="Modem\LoopbackTest.h" />
+    <ClInclude Include="Version.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Audio\WindowsAudioOutput.cpp" />
@@ -130,6 +138,11 @@
     <ClCompile Include="Sip\PjsipEndpoint.cpp" />
     <ClCompile Include="Sip\PjsipCallController.cpp" />
     <ClCompile Include="Sip\CallAudioBridge.cpp" />
+    <ClCompile Include="Config\IniDocument.cpp" />
+    <ClCompile Include="Control\ControlServer.cpp" />
+    <ClCompile Include="Control\ServiceStats.cpp" />
+    <ClCompile Include="Control\SystemInfo.cpp" />
+    <ClCompile Include="Modem\LoopbackTest.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

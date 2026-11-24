@@ -11,6 +11,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VoIPModem.Tests", "tests\Vo
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libv90modem", "third_party\libv90modem-build\libv90modem.vcxproj", "{6B1E2C3A-9D4F-4E7A-8B21-5C0F3A9D7E11}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VoIPModemManager", "src\Manager\VoIPModemManager.vcxproj", "{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -23,6 +25,22 @@ Global
 		Release-XP|x64 = Release-XP|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Debug|x64.ActiveCfg = Debug|x64
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Debug|x64.Build.0 = Debug|x64
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Release|x64.ActiveCfg = Release|x64
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Release|x64.Build.0 = Release|x64
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Debug|Win32.ActiveCfg = Debug|Win32
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Debug|Win32.Build.0 = Debug|Win32
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Release|Win32.ActiveCfg = Release|Win32
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Release|Win32.Build.0 = Release|Win32
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Debug-XP|Win32.ActiveCfg = Debug-XP|Win32
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Debug-XP|Win32.Build.0 = Debug-XP|Win32
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Release-XP|Win32.ActiveCfg = Release-XP|Win32
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Release-XP|Win32.Build.0 = Release-XP|Win32
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Debug-XP|x64.ActiveCfg = Debug-XP|x64
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Debug-XP|x64.Build.0 = Debug-XP|x64
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Release-XP|x64.ActiveCfg = Release-XP|x64
+		{C5940C6B-2642-47BC-822C-0A17FF4AB4C4}.Release-XP|x64.Build.0 = Release-XP|x64
 		{6B1E2C3A-9D4F-4E7A-8B21-5C0F3A9D7E11}.Debug|x64.ActiveCfg = Debug|x64
 		{6B1E2C3A-9D4F-4E7A-8B21-5C0F3A9D7E11}.Debug|x64.Build.0 = Debug|x64
 		{6B1E2C3A-9D4F-4E7A-8B21-5C0F3A9D7E11}.Release|x64.ActiveCfg = Release|x64

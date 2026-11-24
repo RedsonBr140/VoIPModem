@@ -3,7 +3,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -11,6 +13,8 @@
 #include "CommandLineSession.h"
 #include "../Lib/Audio/WindowsAudioOutput.h"
 #include "../Lib/Config/AppConfig.h"
+#include "../Lib/Control/LineStatus.h"
+#include "../Lib/Control/ServiceStats.h"
 #include "../Lib/Core/ICallController.h"
 #include "../Lib/Core/ModemStateMachine.h"
 #include "../Lib/Logging/Logger.h"
@@ -19,6 +23,30 @@
 #include "../Lib/Sip/PjsipEndpoint.h"
 
 namespace voipmodem {
+
+class PjsipCallController;
+
+// Process-wide settings each line's SIP account needs (AppConfig [SIP] /
+// [Media] / [Logging]).
+struct LineRuntimeSettings {
+    std::string sipTransport = "UDP";
+    int sipRegisterExpiry = 300;
+    bool sipRegisterOnStart = true;
+    int rtpPort = 4000;
+    int rtpPortRange = 0;
+    bool traceAtCommands = false;
+};
+
+// An operator action on a line, from the control API. Queued and carried
+// out on the line's own thread, which owns the state machine and the call.
+enum class LineCommand {
+    Answer,        // answer the ringing call (as ATA)
+    HangUp,        // end the call, or refuse the ringing one
+    InService,     // register again and accept calls
+    OutOfService,  // hang up, unregister
+    Register,      // re-register (if in service)
+    Unregister     // unregister until the next Register / restart
+};
 
 // One independently-running modem line: its own COM port, call
 // controller, and state machine, driven by its own thread so that
@@ -31,14 +59,18 @@ namespace voipmodem {
 // Gets a real, PJSIP-backed ICallController (PjsipCallController) when
 // `sipEndpoint` is non-null and the instance's config has a SipServer
 // set; otherwise falls back to NullCallController, same as Phase 1. See
-// docs/ARCHITECTURE.md "SIP integration (Phase 2)".
+// docs/ARCHITECTURE.md "SIP integration (Phase 2)". The SIP account is
+// created (and registered) only once the COM port is open, so a line
+// whose port is missing takes no calls.
 class ModemInstance {
 public:
-    ModemInstance(ModemInstanceConfig config, Logger& sharedLogger, PjsipEndpoint* sipEndpoint);
+    ModemInstance(ModemInstanceConfig config, Logger& sharedLogger, PjsipEndpoint* sipEndpoint,
+                  const LineRuntimeSettings& runtime, ServiceStats& stats);
+    ~ModemInstance();
 
-    // Opens the serial port. Returns false (and logs why) on failure;
-    // the caller decides whether that's fatal for the whole process or
-    // just means this one instance is skipped.
+    // Opens the serial port, then starts the SIP account. Returns false
+    // (and logs why) if the port cannot be opened; the line then reports
+    // "Port closed" and Open() may be retried later.
     bool Open();
 
     // Starts the read loop on a background thread. Call only after a
@@ -49,13 +81,37 @@ public:
     // port. Safe to call even if Start() was never called.
     void Stop();
 
+    bool IsRunning() const { return thread_.joinable(); }
     const std::string& Name() const { return config_.name; }
+    const ModemInstanceConfig& Config() const { return config_; }
+
+    // Thread-safe: queue an operator action (see LineCommand).
+    void Post(LineCommand command);
+
+    // Thread-safe: the line as of its last status refresh (twice a second).
+    LineStatus Status() const;
+
+    // Thread-safe: true while a call exists (ringing, dialing or up).
+    bool InCall() const;
+
+    // Thread-safe: [Logging] TraceAT changed.
+    void SetTrace(bool enabled) { session_.SetTrace(enabled); }
 
 private:
     void RunLoop();
     void PollCallEvents();
     void PumpIncomingCallRinging();
     void PumpDialAudioTrigger();
+    void ProcessCommands();
+    void RefreshStatus();
+    void RequestRegistration(bool registered);
+    void TryRegistration();
+
+    // Call bookkeeping for ServiceStats: state transitions (dial, answer)
+    // and call events (incoming, connected, ended).
+    void ObserveState();
+    void ObserveEvent(const CallEvent& event);
+    void FinishCall();
 
     // Online-data-mode byte passthrough (see docs/ROADMAP.md Phase 4's
     // V.21 data-mode milestone): drains whatever the active call's
@@ -77,6 +133,7 @@ private:
     // (wrong timing), since those bytes were genuinely meant for the far
     // end and were only ever delayed, never consumed.
     void FlushHeldPluses(int count);
+    void SendToCall(const std::vector<std::uint8_t>& bytes);
 
     // Checks whether an in-progress escape attempt has now been silent
     // for the full guard time after its third '+', the other half of
@@ -97,10 +154,16 @@ private:
     void PlayDialSequence(std::string number);
 
     ModemInstanceConfig config_;
+    LineRuntimeSettings runtime_;
+    ServiceStats& stats_;
     TaggedLogger logger_;
     PjsipEndpoint* sipEndpoint_; // nullable; non-owning
     WindowsSerialPort serialPort_;
+    // Declared before callController_: its factory sets it, so it must
+    // already be initialised (to nullptr) by then.
+    PjsipCallController* sip_ = nullptr; // callController_ when it is the SIP one
     std::unique_ptr<ICallController> callController_;
+    bool sipStarted_ = false;
     ModemStateMachine core_;
     CommandLineSession session_;
     std::atomic<bool> stopRequested_{false};
@@ -139,6 +202,36 @@ private:
     std::chrono::steady_clock::time_point lastOnlineDataByteAt_{};
     std::chrono::steady_clock::time_point thirdPlusAt_{};
     static constexpr std::chrono::milliseconds kEscapeGuardTime{1000};
+
+    // Operator commands (Post), drained by the line's thread.
+    std::mutex commandMutex_;
+    std::deque<LineCommand> commands_;
+    std::optional<bool> wantRegistered_; // a (un)registration PJSIP has not accepted yet
+    std::chrono::steady_clock::time_point lastRegistrationAttempt_{};
+
+    // The current (or last) call, for status and statistics. Line thread only.
+    struct CallTrack {
+        bool active = false;
+        bool incoming = false;
+        bool answered = false;
+        bool connected = false;
+        std::chrono::steady_clock::time_point start{};
+        std::chrono::steady_clock::time_point connectedAt{};
+        std::uint64_t bytesTx = 0;
+        std::uint64_t bytesRx = 0;
+        ModemLinkStatus lastModem;
+    };
+    CallTrack call_;
+    ModemState statsState_ = ModemState::CommandMode;
+    std::chrono::steady_clock::time_point lastFailedEndAt_{};
+    bool lastCallFailed_ = false;
+    unsigned long reportedRejectedBusy_ = 0;
+    unsigned long reportedAtCommands_ = 0;
+    std::chrono::steady_clock::time_point lastStatusRefresh_{};
+
+    mutable std::mutex statusMutex_;
+    LineStatus status_;
+    std::atomic<bool> inCall_{false};
 };
 
 } // namespace voipmodem

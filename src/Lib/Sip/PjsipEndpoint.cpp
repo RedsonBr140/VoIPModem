@@ -2,6 +2,8 @@
 
 #include <pjsua2.hpp> // before Windows headers (winsock2 ordering)
 
+#include <algorithm>
+
 #include <windows.h>
 #include <mmsystem.h>
 #pragma comment(lib, "winmm.lib")
@@ -56,7 +58,8 @@ PjsipEndpoint::~PjsipEndpoint() {
     }
 }
 
-bool PjsipEndpoint::Start(int localPort) {
+bool PjsipEndpoint::Start(const EndpointSettings& settings) {
+    const int localPort = settings.localPort;
     try {
         pj::EpConfig epConfig;
         epConfig.logConfig.writer = new LoggerBridge(logger_);
@@ -76,7 +79,7 @@ bool PjsipEndpoint::Start(int localPort) {
         epConfig.medConfig.clockRate = 8000;
         epConfig.medConfig.sndClockRate = 8000;
         epConfig.medConfig.noVad = true;  // no silence suppression — a steady carrier isn't "silence"
-        epConfig.medConfig.ecTailLen = 0; // 0 disables echo cancellation
+        epConfig.medConfig.ecTailLen = settings.echoCanceller ? 128 : 0; // 0 disables echo cancellation (the default: it degrades modem training)
 
         // Jitter buffer tuned for a modem, not for voice. Found live
         // 2026-11-24 (V.90 answering BinModem): PJSIP's defaults -- no
@@ -88,10 +91,13 @@ bool PjsipEndpoint::Start(int localPort) {
         // A modem wants a deep, fixed buffer and never a dropped frame;
         // the added latency only lengthens the round trip, which the
         // modems measure and absorb in training.
-        epConfig.medConfig.jbInit = 160;
-        epConfig.medConfig.jbMinPre = 120;
-        epConfig.medConfig.jbMaxPre = 400;
-        epConfig.medConfig.jbMax = 1000;
+        // [Media] JitterBufferMs sets the initial prefetch (default 160);
+        // the other depths keep the proportions found live (120/400/1000).
+        const int jb = settings.jitterBufferMs;
+        epConfig.medConfig.jbInit = jb;
+        epConfig.medConfig.jbMinPre = jb * 3 / 4;
+        epConfig.medConfig.jbMaxPre = jb * 5 / 2;
+        epConfig.medConfig.jbMax = (std::max)(1000, jb * 5);
         epConfig.medConfig.jbDiscardAlgo = PJMEDIA_JB_DISCARD_NONE;
 
         // No sound card: the null device's clock thread drives the
@@ -100,17 +106,19 @@ bool PjsipEndpoint::Start(int localPort) {
         // resolution for the process keeps that clock steady.
         timeBeginPeriod(1);
 
-        // Only a UDP transport is created (below). By default PJSIP moves
-        // any request of 1300 bytes or more to TCP (RFC 3261 18.1.1); with
-        // no TCP transport that attempt fails ("Unsupported transport",
-        // seen on XP) before PJSIP falls back to UDP. Stay on UDP.
+        // One transport is created (below), UDP unless [SIP] Transport=TCP.
+        // By default PJSIP moves any request of 1300 bytes or more from UDP
+        // to TCP (RFC 3261 18.1.1); with no TCP transport that attempt
+        // fails ("Unsupported transport", seen on XP) before PJSIP falls
+        // back to UDP. Stay on the configured transport.
         pjsip_cfg()->endpt.disable_tcp_switch = PJ_TRUE;
 
         endpoint_->libInit(epConfig);
 
         pj::TransportConfig transportConfig;
         transportConfig.port = static_cast<unsigned>(localPort);
-        endpoint_->transportCreate(PJSIP_TRANSPORT_UDP, transportConfig);
+        endpoint_->transportCreate(settings.transport == "TCP" ? PJSIP_TRANSPORT_TCP : PJSIP_TRANSPORT_UDP,
+                                   transportConfig);
 
         // No real sound device: Phase 3's audio sink is WAV record/playback
         // (see PjsipCallController's onCallMediaState), which — like the
@@ -124,9 +132,11 @@ bool PjsipEndpoint::Start(int localPort) {
         endpoint_->audDevManager().setNullDev();
 
         endpoint_->libStart();
-        RestrictCodecsToG711();
+        RestrictCodecsToG711(settings.preferredCodec);
         started_ = true;
-        logger_.Info("PJSIP endpoint started, UDP port " + std::to_string(localPort));
+        logger_.Info("PJSIP endpoint started, " + settings.transport + " port " + std::to_string(localPort) +
+                     ", codec " + settings.preferredCodec + " first, jitter buffer " + std::to_string(jb) + " ms" +
+                     (settings.echoCanceller ? ", echo canceller ON" : ""));
         return true;
     } catch (const pj::Error& err) {
         logger_.Error("Failed to start PJSIP endpoint: " + err.info());
@@ -134,11 +144,12 @@ bool PjsipEndpoint::Start(int localPort) {
     }
 }
 
-void PjsipEndpoint::RestrictCodecsToG711() {
+void PjsipEndpoint::RestrictCodecsToG711(const std::string& preferred) {
     for (const pj::CodecInfo& codec : endpoint_->codecEnum2()) {
         const bool isG711 = codec.codecId.rfind("PCMU/", 0) == 0 || codec.codecId.rfind("PCMA/", 0) == 0;
         try {
-            endpoint_->codecSetPriority(codec.codecId, isG711 ? static_cast<pj_uint8_t>(210) : 0);
+            const bool first = codec.codecId.rfind(preferred + "/", 0) == 0;
+            endpoint_->codecSetPriority(codec.codecId, isG711 ? static_cast<pj_uint8_t>(first ? 220 : 210) : 0);
         } catch (const pj::Error& err) {
             logger_.Warn("Failed to set priority for codec '" + codec.codecId + "': " + err.info());
         }
@@ -160,6 +171,14 @@ void PjsipEndpoint::RestrictCodecsToG711() {
 void PjsipEndpoint::RegisterCurrentThread(const std::string& threadName) {
     if (!endpoint_->libIsThreadRegistered()) {
         endpoint_->libRegisterThread(threadName);
+    }
+}
+
+std::string PjsipEndpoint::LibraryVersion() {
+    try {
+        return endpoint_->libVersion().full;
+    } catch (const pj::Error&) {
+        return "";
     }
 }
 

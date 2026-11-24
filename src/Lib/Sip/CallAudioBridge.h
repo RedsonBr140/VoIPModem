@@ -10,12 +10,14 @@
 #include <pjsua2.hpp>
 
 #include "../Audio/WindowsAudioOutput.h"
+#include "../Core/CallStatus.h"
 #include "../Logging/TaggedLogger.h"
 
 // libv90modem's opaque handles (third_party/libv90modem/include/v90modem.h),
 // forward-declared so its C header stays out of every includer.
 struct v90m;
 struct v90m_ec;
+struct v90m_async;
 
 namespace voipmodem {
 
@@ -53,12 +55,18 @@ namespace voipmodem {
 //
 // If `enableLocalAudio` is true, every frame's RX+TX mix also goes to
 // the PC's default sound output (WindowsAudioOutput), as a modem speaker.
+// The modem settings of one line (see ModemInstanceConfig).
+struct ModemOptions {
+    std::string modulations;  // ModemInstanceConfig::modulations; empty = defaults
+    bool errorControl = true; // V.42 LAPM; off = plain start-stop characters
+    bool compression = true;  // V.42bis / V.44 offered inside LAPM
+};
+
 class CallAudioBridge : public pj::AudioMediaPort {
 public:
     // `alaw`: the call's negotiated codec is PCMA (else PCMU).
-    // `modulations`: ModemInstanceConfig::modulations; empty = defaults.
-    CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableLocalAudio = false, bool alaw = false,
-                    const std::string& modulations = "");
+    CallAudioBridge(bool callingParty, TaggedLogger& logger, bool enableLocalAudio, bool alaw,
+                    const ModemOptions& options);
     ~CallAudioBridge() override;
 
     CallAudioBridge(const CallAudioBridge&) = delete;
@@ -80,6 +88,9 @@ public:
     bool TakeModemConnected(int& rxBps);
     bool TakeModemEnded();
 
+    // Thread-safe: the modem link as of the last frame.
+    ModemLinkStatus GetLinkStatus() const;
+
     // libv90modem's getbit/putbit/on_event, reached through C callbacks
     // in the .cpp; media thread only. Not for other callers.
     int ModemGetBit();
@@ -92,7 +103,9 @@ protected:
 
 private:
     void PumpErrorControl(unsigned elapsedMs);
+    void PumpAsync();
     void LogErrorControlState();
+    void UpdateLinkStatus(bool includeErrorControl);
     void PlayLocally(const std::vector<std::int16_t>& rx, const std::vector<std::int16_t>& tx);
 
     bool callingParty_;
@@ -100,7 +113,12 @@ private:
     std::mutex frameMutex_; // media-thread frame work vs. destruction: see ~CallAudioBridge
     v90m* modem_ = nullptr;
     v90m_ec* ec_ = nullptr;
+    v90m_async* async_ = nullptr; // instead of ec_ when error control is off
+    bool errorControl_ = true;
+    bool compression_ = true;
     bool ecActive_ = false; // reset at V90M_EV_CONNECTED; bits flow through it from then on
+    bool asyncActive_ = false; // the same, for async_
+    unsigned frameCount_ = 0;
     int lastEcState_ = -1;
     std::string modulationsDescription_; // for the start log line
     std::vector<std::int16_t> pendingTxSamples_;
@@ -113,6 +131,7 @@ private:
     int connectRxBps_ = 0;
     bool endPending_ = false;
     bool endSignalled_ = false; // sticky: end is reported to the controller at most once
+    ModemLinkStatus linkStatus_;
 };
 
 } // namespace voipmodem

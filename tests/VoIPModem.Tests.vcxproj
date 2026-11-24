@@ -99,6 +99,8 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="AppConfigTests.cpp" />
     <ClCompile Include="AtCommandParserTests.cpp" />
+    <ClCompile Include="ControlTests.cpp" />
+    <ClCompile Include="IniDocumentTests.cpp" />
     <ClCompile Include="DspPrimitiveTests.cpp" />
     <ClCompile Include="DtmfGeneratorTests.cpp" />
     <ClCompile Include="LibV90ModemTests.cpp" />

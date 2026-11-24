@@ -1,0 +1,294 @@
+// VoIPModem Manager resources. ASCII only: texts with typographic
+// characters are set from code.
+#include <windows.h>
+#include <commctrl.h>
+#include "resource.h"
+#include "../Lib/Version.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+
+IDR_MAINMENU MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&Connect to service...",          IDM_CONNECT
+        MENUITEM "&Disconnect",                     IDM_DISCONNECT
+        MENUITEM SEPARATOR
+        MENUITEM "&Reload voipmodem.ini\tCtrl+R",   IDM_RELOAD
+        MENUITEM SEPARATOR
+        MENUITEM "Export &statistics...",           IDM_EXPORT_STATS
+        MENUITEM "Export event &log...",            IDM_EXPORT_LOG
+        MENUITEM SEPARATOR
+        MENUITEM "S&tart service",                  IDM_SERVICE_START
+        MENUITEM "Sto&p service",                   IDM_SERVICE_STOP
+        MENUITEM "Restart ser&vice",                IDM_SERVICE_RESTART
+        MENUITEM "&Install service...",             IDM_SERVICE_INSTALL
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit\tAlt+F4",                   IDM_EXIT
+    END
+    POPUP "&Lines"
+    BEGIN
+        MENUITEM "&Answer now",                     IDM_ANSWER
+        MENUITEM "&Hang up\tCtrl+H",                IDM_HANGUP
+        MENUITEM "&Reset line",                     IDM_RESET
+        MENUITEM SEPARATOR
+        MENUITEM "&Take line out of service",       IDM_TOGGLE_SERVICE
+        MENUITEM "Put &all lines in service",       IDM_ALL_IN_SERVICE
+        MENUITEM SEPARATOR
+        MENUITEM "Line &properties...\tAlt+Enter",  IDM_PROPERTIES
+    END
+    POPUP "&SIP"
+    BEGIN
+        MENUITEM "&Re-register all extensions",     IDM_REREGISTER
+        MENUITEM "&Unregister all extensions",      IDM_UNREGISTER
+        MENUITEM SEPARATOR
+        MENUITEM "&Account settings...",            IDM_ACCOUNT_SETTINGS
+        MENUITEM "Show SIP &trace...",              IDM_SIP_TRACE
+    END
+    POPUP "&Modem"
+    BEGIN
+        MENUITEM "&New modem line...\tCtrl+N",      IDM_NEW_LINE
+        MENUITEM "&Remove selected line\tDel",      IDM_REMOVE_LINE
+        MENUITEM SEPARATOR
+        MENUITEM "Modem &defaults...",              IDM_MODEM_DEFAULTS
+        MENUITEM "&Loopback self-test...",          IDM_SELFTEST
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Toolbar",                        IDM_VIEW_TOOLBAR, CHECKED
+        MENUITEM "&Status bar",                     IDM_VIEW_STATUSBAR, CHECKED
+        MENUITEM "&Event log pane",                 IDM_VIEW_LOG, CHECKED
+        MENUITEM SEPARATOR
+        MENUITEM "&Refresh now\tF5",                IDM_REFRESH
+    END
+    POPUP "&Tools"
+    BEGIN
+        MENUITEM "&Settings...",                    IDM_SETTINGS
+        MENUITEM "&AT command console...",          IDM_AT_CONSOLE
+        MENUITEM SEPARATOR
+        MENUITEM "&com0com port pairs...",          IDM_PORT_PAIRS
+        MENUITEM "&Driver bindings...",             IDM_DRIVERS
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&Contents\tF1",                   IDM_HELP_CONTENTS
+        MENUITEM "&Readme",                         IDM_README
+        MENUITEM SEPARATOR
+        MENUITEM "&About VoIPModem...",             IDM_ABOUT
+    END
+    MENUITEM "Not connected",                       IDM_STATUS_LABEL, HELP, GRAYED
+END
+
+IDR_ACCEL ACCELERATORS
+BEGIN
+    "R",        IDM_RELOAD,         VIRTKEY, CONTROL
+    "H",        IDM_HANGUP,         VIRTKEY, CONTROL
+    "N",        IDM_NEW_LINE,       VIRTKEY, CONTROL
+    VK_RETURN,  IDM_PROPERTIES,     VIRTKEY, ALT
+    VK_DELETE,  IDM_REMOVE_LINE,    VIRTKEY
+    VK_F5,      IDM_REFRESH,        VIRTKEY
+    VK_F1,      IDM_HELP_CONTENTS,  VIRTKEY
+END
+
+IDD_CONNECT DIALOGEX 0, 0, 236, 98
+STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Connect to VoIPModem"
+FONT 8, "MS Shell Dlg 2"
+BEGIN
+    LTEXT           "Computer running the service:", -1, 7, 9, 104, 8
+    EDITTEXT        IDC_CN_HOST, 114, 7, 115, 12, ES_AUTOHSCROLL
+    LTEXT           "Control port:", -1, 7, 26, 104, 8
+    EDITTEXT        IDC_CN_PORT, 114, 24, 40, 12, ES_NUMBER
+    LTEXT           "Password (if the service has one):", -1, 7, 43, 104, 8
+    EDITTEXT        IDC_CN_PASSWORD, 114, 41, 115, 12, ES_PASSWORD | ES_AUTOHSCROLL
+    LTEXT           "127.0.0.1 is this computer. The port is [Control] Port in voipmodem.ini (7880 by default).", -1, 7, 58, 222, 16
+    DEFPUSHBUTTON   "Connect", IDOK, 125, 78, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 179, 78, 50, 14
+END
+
+IDD_LINE DIALOGEX 0, 0, 262, 236
+STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Line properties"
+FONT 8, "MS Shell Dlg 2"
+BEGIN
+    GROUPBOX        "Line", -1, 7, 4, 248, 202
+    LTEXT           "Name:", -1, 14, 19, 84, 8
+    EDITTEXT        IDC_LN_NAME, 100, 17, 80, 12, ES_AUTOHSCROLL
+    LTEXT           "COM port (com0com):", -1, 14, 36, 84, 8
+    COMBOBOX        IDC_LN_COM, 100, 34, 80, 120, CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "SIP extension:", -1, 14, 53, 84, 8
+    EDITTEXT        IDC_LN_EXT, 100, 51, 80, 12, ES_AUTOHSCROLL
+    LTEXT           "SIP password:", -1, 14, 70, 84, 8
+    EDITTEXT        IDC_LN_PASS, 100, 68, 80, 12, ES_PASSWORD | ES_AUTOHSCROLL
+    LTEXT           "", IDC_LN_PASS_NOTE, 184, 70, 66, 8
+    LTEXT           "SIP server:", -1, 14, 87, 84, 8
+    EDITTEXT        IDC_LN_SERVER, 100, 85, 120, 12, ES_AUTOHSCROLL
+    LTEXT           "Blank: the registrar in Settings.", -1, 100, 99, 150, 8
+    LTEXT           "Maximum rate:", -1, 14, 115, 84, 8
+    COMBOBOX        IDC_LN_MAX, 100, 113, 120, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    AUTOCHECKBOX    "Answer incoming calls on this line automatically", IDC_LN_AUTO, 14, 132, 230, 10
+    AUTOCHECKBOX    "In service (registered, taking calls)", IDC_LN_INSERVICE, 14, 145, 230, 10
+    AUTOCHECKBOX    "V.42 error correction", IDC_LN_V42, 14, 158, 230, 10
+    AUTOCHECKBOX    "V.42bis / V.44 compression", IDC_LN_COMP, 14, 171, 230, 10
+    LTEXT           "", IDC_LN_DRIVER, 14, 187, 236, 16
+    DEFPUSHBUTTON   "OK", IDOK, 149, 214, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 205, 214, 50, 14
+END
+
+IDD_SETTINGS DIALOGEX 0, 0, 334, 214
+STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "VoIPModem settings"
+FONT 8, "MS Shell Dlg 2"
+BEGIN
+    CONTROL         "", IDC_SET_TAB, WC_TABCONTROLA, WS_TABSTOP, 7, 7, 320, 172
+
+    LTEXT           "SIP registrar:", IDC_SIP_L1, 16, 30, 100, 8
+    EDITTEXT        IDC_SIP_SERVER, 120, 28, 140, 12, ES_AUTOHSCROLL
+    LTEXT           "Registrar port:", IDC_SIP_L2, 16, 47, 100, 8
+    EDITTEXT        IDC_SIP_PORT, 120, 45, 40, 12, ES_NUMBER
+    LTEXT           "Local SIP port:", IDC_SIP_L3, 16, 64, 100, 8
+    EDITTEXT        IDC_SIP_LOCALPORT, 120, 62, 40, 12, ES_NUMBER
+    LTEXT           "Transport:", IDC_SIP_L4, 16, 81, 100, 8
+    COMBOBOX        IDC_SIP_TRANSPORT, 120, 79, 60, 60, CBS_DROPDOWNLIST | WS_TABSTOP
+    LTEXT           "Authentication realm:", IDC_SIP_L5, 16, 98, 100, 8
+    EDITTEXT        IDC_SIP_REALM, 120, 96, 80, 12, ES_AUTOHSCROLL
+    LTEXT           "Register expiry (s):", IDC_SIP_L6, 16, 115, 100, 8
+    EDITTEXT        IDC_SIP_EXPIRY, 120, 113, 40, 12, ES_NUMBER
+    AUTOCHECKBOX    "Register all lines when the service starts", IDC_SIP_REGONSTART, 120, 131, 190, 10
+    LTEXT           "Extensions and passwords are per line: Lines > Line properties.", IDC_SIP_NOTE, 16, 152, 300, 16
+
+    LTEXT           "Codec offered first:", IDC_MED_L1, 16, 30, 100, 8
+    COMBOBOX        IDC_MED_CODEC, 120, 28, 110, 60, CBS_DROPDOWNLIST | WS_TABSTOP
+    LTEXT           "Packet time:", IDC_MED_L2, 16, 47, 100, 8
+    LTEXT           "20 ms (the modem engine works in 20 ms frames)", IDC_MED_PTIME, 120, 47, 190, 8
+    LTEXT           "RTP ports:", IDC_MED_L3, 16, 64, 100, 8
+    EDITTEXT        IDC_MED_RTP, 120, 62, 70, 12, ES_AUTOHSCROLL
+    LTEXT           "first-last, or first only", IDC_MED_N1, 196, 64, 110, 8
+    LTEXT           "Jitter buffer (ms):", IDC_MED_L4, 16, 81, 100, 8
+    EDITTEXT        IDC_MED_JITTER, 120, 79, 40, 12, ES_NUMBER
+    LTEXT           "raise for lossy trunks", IDC_MED_N2, 166, 81, 110, 8
+    AUTOCHECKBOX    "Echo canceller (degrades modem training)", IDC_MED_EC, 120, 98, 190, 10
+
+    LTEXT           "Maximum rate:", IDC_MOD_L1, 16, 30, 100, 8
+    COMBOBOX        IDC_MOD_MAX, 120, 28, 110, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Minimum rate:", IDC_MOD_L2, 16, 47, 100, 8
+    COMBOBOX        IDC_MOD_MIN, 120, 45, 110, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Answer after:", IDC_MOD_L3, 16, 64, 100, 8
+    COMBOBOX        IDC_MOD_RINGS, 120, 62, 110, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "ATI identification:", IDC_MOD_L4, 16, 81, 100, 8
+    EDITTEXT        IDC_MOD_IDENT, 120, 79, 160, 12, ES_AUTOHSCROLL
+    AUTOCHECKBOX    "V.42 error correction", IDC_MOD_V42, 120, 97, 190, 10
+    AUTOCHECKBOX    "V.42bis / V.44 compression", IDC_MOD_COMP, 120, 110, 190, 10
+    LTEXT           "These apply to every line that does not set its own value.", IDC_MOD_NOTE, 16, 152, 300, 16
+
+    LTEXT           "Log file:", IDC_LOG_L1, 16, 30, 100, 8
+    EDITTEXT        IDC_LOG_FILE, 120, 28, 190, 12, ES_AUTOHSCROLL
+    LTEXT           "Log level:", IDC_LOG_L2, 16, 47, 100, 8
+    COMBOBOX        IDC_LOG_LEVEL, 120, 45, 70, 80, CBS_DROPDOWNLIST | WS_TABSTOP
+    LTEXT           "Rotate at (KB):", IDC_LOG_L3, 16, 64, 100, 8
+    EDITTEXT        IDC_LOG_ROTATE, 120, 62, 50, 12, ES_NUMBER
+    LTEXT           "0 = never", IDC_LOG_N1, 176, 64, 80, 8
+    LTEXT           "Files to keep:", IDC_LOG_L4, 16, 81, 100, 8
+    EDITTEXT        IDC_LOG_KEEP, 120, 79, 30, 12, ES_NUMBER
+    AUTOCHECKBOX    "Record AT commands and responses", IDC_LOG_TRACEAT, 120, 97, 190, 10
+
+    LTEXT           "Control port:", IDC_CTL_L1, 16, 30, 100, 8
+    EDITTEXT        IDC_CTL_PORT, 120, 28, 40, 12, ES_NUMBER
+    LTEXT           "Listen on:", IDC_CTL_L2, 16, 47, 100, 8
+    EDITTEXT        IDC_CTL_BIND, 120, 45, 70, 12, ES_AUTOHSCROLL
+    LTEXT           "127.0.0.1 = this computer only", IDC_CTL_N1, 196, 47, 120, 8
+    LTEXT           "New password:", IDC_CTL_L3, 16, 64, 100, 8
+    EDITTEXT        IDC_CTL_PASSWORD, 120, 62, 90, 12, ES_PASSWORD | ES_AUTOHSCROLL
+    AUTOCHECKBOX    "Remove the password", IDC_CTL_CLEARPW, 120, 79, 190, 10
+    LTEXT           "Set a password before listening on anything but 127.0.0.1: the API can change every setting.", IDC_CTL_N2, 16, 100, 300, 16
+
+    LTEXT           "Changes are written to voipmodem.ini and applied to idle lines.", IDC_SET_FOOTER, 7, 191, 210, 16
+    DEFPUSHBUTTON   "OK", IDOK, 221, 189, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 277, 189, 50, 14
+END
+
+IDD_SELFTEST DIALOGEX 0, 0, 236, 112
+STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Loopback self-test"
+FONT 8, "MS Shell Dlg 2"
+BEGIN
+    LTEXT           "Connects two of the service's modems to each other on a perfect line, to check the modem engine on the server.", -1, 7, 7, 222, 18
+    LTEXT           "Modulation:", -1, 7, 32, 50, 8
+    COMBOBOX        IDC_ST_MOD, 60, 30, 80, 80, CBS_DROPDOWNLIST | WS_TABSTOP
+    DEFPUSHBUTTON   "Run", IDC_ST_RUN, 146, 29, 50, 14
+    LTEXT           "", IDC_ST_RESULT, 7, 52, 222, 34, SS_SUNKEN
+    PUSHBUTTON      "Close", IDCANCEL, 179, 92, 50, 14
+END
+
+IDD_PORTS DIALOGEX 0, 0, 340, 230
+STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Ports and modem drivers"
+FONT 8, "MS Shell Dlg 2"
+BEGIN
+    LTEXT           "com0com port pairs on the service's computer:", -1, 7, 7, 320, 8
+    CONTROL         "", IDC_PT_PAIRS, WC_LISTVIEWA, LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER | WS_BORDER | WS_TABSTOP, 7, 18, 326, 66
+    LTEXT           "Windows modem drivers:", -1, 7, 90, 320, 8
+    CONTROL         "", IDC_PT_MODEMS, WC_LISTVIEWA, LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER | WS_BORDER | WS_TABSTOP, 7, 101, 326, 66
+    LTEXT           "", IDC_PT_NOTE, 7, 172, 326, 34
+    PUSHBUTTON      "Refresh", IDC_PT_REFRESH, 227, 210, 50, 14
+    DEFPUSHBUTTON   "Close", IDCANCEL, 283, 210, 50, 14
+END
+
+IDD_TRACE DIALOGEX 0, 0, 400, 250
+STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "SIP trace"
+FONT 8, "MS Shell Dlg 2"
+BEGIN
+    EDITTEXT        IDC_TR_TEXT, 7, 7, 386, 212, ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | ES_AUTOHSCROLL | WS_VSCROLL | WS_HSCROLL
+    AUTOCHECKBOX    "Show every log line", IDC_TR_ALL, 7, 230, 100, 10
+    PUSHBUTTON      "Set log level to Debug", IDC_TR_DEBUG, 230, 228, 100, 14
+    DEFPUSHBUTTON   "Close", IDCANCEL, 343, 228, 50, 14
+END
+
+IDD_CONSOLE DIALOGEX 0, 0, 340, 250
+STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "AT command console"
+FONT 8, "MS Shell Dlg 2"
+BEGIN
+    LTEXT           "Port:", -1, 7, 9, 20, 8
+    COMBOBOX        IDC_CON_PORT, 30, 7, 60, 120, CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Open", IDC_CON_OPEN, 96, 6, 50, 14
+    LTEXT           "", IDC_CON_NOTE, 152, 5, 181, 18
+    EDITTEXT        IDC_CON_OUT, 7, 26, 326, 192, ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL
+    EDITTEXT        IDC_CON_IN, 7, 226, 270, 12, ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "Send", IDC_CON_SEND, 283, 225, 50, 14
+END
+
+IDD_ABOUT DIALOGEX 0, 0, 250, 150
+STYLE DS_SHELLFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "About VoIPModem"
+FONT 8, "MS Shell Dlg 2"
+BEGIN
+    LTEXT           "", IDC_AB_TEXT, 7, 7, 236, 116
+    DEFPUSHBUTTON   "OK", IDOK, 193, 129, 50, 14
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEFLAGSMASK 0x3fL
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "FileDescription", "VoIPModem Manager"
+            VALUE "FileVersion", VOIPMODEM_VERSION
+            VALUE "ProductName", "VoIPModem"
+            VALUE "ProductVersion", VOIPMODEM_VERSION
+            VALUE "OriginalFilename", "VoIPModemManager.exe"
+            VALUE "LegalCopyright", "GPL-2.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

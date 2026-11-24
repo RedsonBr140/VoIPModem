@@ -11,7 +11,7 @@ just coded. `ARCHITECTURE.md` describes how each part works.
 | 3. RTP audio | **Complete**, verified live; media path retuned for modems in Phase 4 |
 | 4. Modem interoperability | **In progress**: real data links at up to V.90 with a SIP softmodem; physical analog modem not yet tested |
 | 5. Windows networking (RAS/PPP) | Not started |
-| 6. Compatibility and optimization | **Started**: x64 + Win32 builds; XP Win32 build runs on 32-bit XP (V.34 call live); XP x64 / Server 2003 not yet built |
+| 6. Compatibility and optimization | **Started**: x64 + Win32 builds; XP Win32 build runs on 32-bit XP (V.34 call live); XP x64 / Server 2003 not yet built; Windows service + control API + VoIPModem Manager built |
 
 ## Phase 1 — Serial modem skeleton — complete
 
@@ -185,6 +185,39 @@ versions) per Windows generation where needed.
     (`disable_tcp_switch`), so requests stay on UDP.
 - **Next**: the x64 XP build (XP x64 / Server 2003 x64, untested so far),
   Server 2003 itself, then CI, if GitHub's runner image has `v141_xp`.
+
+**Operations: Windows service, control API, VoIPModem Manager.** Built
+after `docs/design` (a mock-up in the Windows Server 2003 style).
+
+- **Done**:
+  - `VoIPModem.exe --install` / `--uninstall` / `--service`: a Windows
+    service (automatic start, restart on failure) running the same
+    application as the console.
+  - The control API (`CONTROL_API.md`): status, statistics and the event
+    log; answer, hang up, reset, in/out of service, re-register; add,
+    edit and remove lines and change settings, written into the ini with
+    its comments kept and applied to idle lines (or after a restart,
+    which the API itself can do); a loopback self-test; the host's COM
+    ports, com0com pairs and modem drivers. Optional password.
+  - `VoIPModemManager.exe`, a Win32 program on that API only.
+  - New settings behind them: `[Defaults]`, `[Media]`, `[Control]`,
+    `[SIP] Transport/Server/Realm/RegisterExpiry/RegisterOnStart`,
+    `[Logging] RotateKB/Keep/TraceAT`, per line `ErrorControl`,
+    `Compression`, `InService`. A line whose port is missing is retried
+    every 30 s instead of being dropped.
+- **Verified** (2026-11-24, on the development machine): 101 unit tests
+  (ini writer, defaults, statistics, com0com pairing, the API server over
+  a socket with and without a password); the API end to end against a
+  running service (status, line add, settings saved into the ini,
+  in/out of service, reset, restart in-process with PJSIP recreated,
+  stop); registration status against an unreachable registrar (408 shown
+  as "Not registered"); the Manager driven against a running service
+  (main window, settings, line properties, new line, ports and drivers,
+  self-test passing at V.34, about). XP Win32 build of both programs:
+  101 tests pass, PE 5.01, no import newer than XP SP3.
+- **Not yet verified**: a live modem call watched and controlled from the
+  Manager; running as a service (install, start, stop) on XP or Server
+  2003; the Manager against a service on another computer.
 
 ## Recommended next step
 

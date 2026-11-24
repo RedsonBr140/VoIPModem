@@ -41,7 +41,8 @@ jobs:
         run: ./${{ matrix.platform }}/Release/VoIPModem.Tests.exe
 
       # The binary links libv90modem (GPL-2.0-only) and PJSIP (GPL-2.0 or
-      # later), so their licence texts ship with it.
+      # later), so their licence texts ship with it; the service and the
+      # Manager also use JSON for Modern C++ (MIT).
       - name: Package
         shell: pwsh
         run: |
@@ -49,10 +50,12 @@ jobs:
           $dir = "dist/$name"
           New-Item -ItemType Directory -Force "$dir/licenses" | Out-Null
           Copy-Item ${{ matrix.platform }}/Release/VoIPModem.exe $dir
+          Copy-Item ${{ matrix.platform }}/Release/VoIPModemManager.exe $dir
           Copy-Item config/voipmodem.ini.sample $dir
           Copy-Item README.md $dir
           Copy-Item third_party/libv90modem/LICENSE "$dir/licenses/libv90modem-LICENSE.txt"
           Copy-Item third_party/pjproject/COPYING "$dir/licenses/pjproject-COPYING.txt"
+          Copy-Item third_party/nlohmann/LICENSE.MIT "$dir/licenses/nlohmann-json-LICENSE.txt"
           Compress-Archive -Path "$dir/*" -DestinationPath "dist/$name.zip"
 
       - uses: actions/upload-artifact@v4

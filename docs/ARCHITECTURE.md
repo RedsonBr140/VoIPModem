@@ -30,6 +30,12 @@ the modem link (libv90modem reaching data mode) and PPP (Windows RAS,
 later) are separate states, and success at one is never taken as success
 at another. `CONNECT` is reported only when the modem link is up.
 
+VoIPModem runs headless, in a console or as a Windows service, and is
+operated through a **control API** (JSON lines over TCP, localhost by
+default; `CONTROL_API.md`). **VoIPModem Manager** (`VoIPModemManager.exe`)
+is a separate Win32 program that only talks to that API, so the service
+runs without it, and it can watch a service on another computer.
+
 ## Module layout
 
 ```
@@ -41,19 +47,26 @@ src/
     Sip/                   PjsipEndpoint, PjsipCallController, CallAudioBridge (the modem)
     Audio/                 WindowsAudioOutput: optional local "modem speaker"
     Dsp/                   Dial tone/DTMF generators for the local speaker (+ a Goertzel detector their tests use)
-    Config/                INI loading, AppConfig (one ModemInstanceConfig per line)
-    Logging/               Leveled logger + TaggedLogger (per-line prefix)
+    Config/                INI loading, AppConfig (one ModemInstanceConfig per line), IniDocument (writes the ini, keeping comments)
+    Control/               ControlServer (the API's TCP transport), LineStatus, ServiceStats, SystemInfo (COM ports, com0com pairs, modem drivers)
+    Modem/                 LoopbackTest: the self-test (two libv90modem modems back to back)
+    Logging/               Leveled logger (file rotation, in-memory tail for the API) + TaggedLogger
   App/                     VoIPModem (executable)
-    Application.*          Loads config, owns the shared Logger + PjsipEndpoint, runs all lines
-    ModemInstance.*        One modem line: port, call controller, state machine, session, thread
+    Application.*          Loads config, owns Logger + PjsipEndpoint + ControlServer, runs and reconfigures the lines, answers the API
+    ModemInstance.*        One modem line: port, call controller, state machine, session, thread; status and call bookkeeping
     CommandLineSession.*   Line buffering, local echo, response framing
-    main.cpp               Entry point, Ctrl+C handling
+    main.cpp               Entry point: console (Ctrl+C), Windows service, --install / --uninstall
+  Manager/                 VoIPModemManager (Win32 GUI; no PJSIP, no modem engine)
+    MainWindow.cpp         Main window: lines list, statistics, carrier, event log, status bar
+    Dialogs.*              Connect, line properties / new line, settings, self-test, ports, SIP trace, AT console, about
+    ControlClient.*        The API client, on a worker thread
 tests/                     VoIPModem.Tests (executable, hand-rolled framework in TestFramework.h)
 third_party/
   pjproject/               PJSIP 2.17, git submodule, built from source
   pjsip-config/            VoIPModem's config_site.h for pjproject
   libv90modem/             libv90modem 0.6.0, git submodule (GPL-2.0-only)
   libv90modem-build/       libv90modem.vcxproj: MSVC build of the submodule
+  nlohmann/                JSON for Modern C++ 3.11.3, single header (MIT), for the control API
 build/
   VoIPModem.props          Imported by every project: output folders, PJSIP paths and library name
 scripts/
@@ -68,9 +81,11 @@ its own beyond those local-speaker sounds.
 ```
 main.cpp -> Application -> ModemInstance (one per line) -> CommandLineSession -> ModemStateMachine (Core)
                         \-> PjsipEndpoint (shared)      \-> WindowsSerialPort -> AtCommandParser (Hayes)
-                                                         \-> ICallController (Core)
-                                                               implemented by: NullCallController
+                        \-> ControlServer               \-> ICallController (Core)
+                        \-> ServiceStats <--------------/     implemented by: NullCallController
                                                                              | PjsipCallController -> CallAudioBridge -> libv90modem
+
+VoIPModemManager --TCP--> ControlServer (only this; it links no VoIPModem library)
 ```
 
 `ModemStateMachine` depends only on `ICallController`; it knows nothing
@@ -87,8 +102,21 @@ only the `Logger` (through a `TaggedLogger` that prefixes each line's
 messages, e.g. `[Line1]`) and the process-wide `PjsipEndpoint`.
 
 Config: a bare `[Modem]` section is one unnamed line; `[Modem.<name>]`
-sections are N named lines. If one line's port fails to open, it is
-logged and skipped and the other lines still start.
+sections are N named lines. A line's SIP account is created and
+registered only once its COM port is open. If a port fails to open, the
+line shows "Port closed" and `Application` tries again every 30 s; the
+other lines run regardless. `InService=0` keeps a line unregistered (its
+port stays open).
+
+Each line keeps a status snapshot (refreshed twice a second: state,
+caller, modulation and rates, SNR, retrains, V.42 errors, data bytes,
+RTP jitter and loss, registration) and reports its calls to
+`ServiceStats` (offered, answered, trained, failed to train, refused
+busy, caller hung up first, durations, connections per mode). Operator
+actions from the API (answer, hang up, in/out of service, re-register)
+are queued to the line's own thread, which owns the call. A refused
+(un)registration (PJSIP busy with a REGISTER in flight) is retried every
+2 s until PJSIP takes it.
 
 The loop: in command mode, serial bytes go through `CommandLineSession`
 to the parser and state machine. In `OnlineData`, serial bytes go
@@ -169,9 +197,10 @@ not. `PjsipEndpoint::Start()` therefore sets:
 | Codecs | PCMU and PCMA only; all others disabled | a voice codec destroys modem signals |
 | Clock rate | 8000 Hz (and sound clock) | no resampling anywhere |
 | VAD | off | a steady carrier is not silence |
-| Echo canceller | off (`ecTailLen = 0`) | the modems cancel their own echo |
+| Echo canceller | off (`ecTailLen = 0`; `[Media] EchoCanceller=1` turns it on, against advice) | the modems cancel their own echo |
 | PLC (G.711) | off | a missing frame must stay silence, not invented audio |
-| Jitter buffer | init 160 ms, min/max prefetch 120/400 ms, max 1000 ms, discard NONE | never run empty, never drop frames to cut latency |
+| Jitter buffer | init 160 ms, min/max prefetch 120/400 ms, max 1000 ms, discard NONE (`[Media] JitterBufferMs` scales all four) | never run empty, never drop frames to cut latency |
+| Codec order | PCMU first (`[Media] Codec=PCMA` for A-law first) | both are offered; the far end picks |
 | Timer resolution | `timeBeginPeriod(1)` | with no sound card, the null device's clock drives the conference bridge and must tick steadily |
 
 The jitter buffer and PLC settings matter most. With PJSIP's defaults (no
@@ -235,6 +264,13 @@ the call's audio when PJSIP reports media active:
   freed.
 - **Modulations** offered come from the line's `Modulations=` setting
   (default: libv90modem's defaults plus V.92).
+- **Error control** can be turned off per line (`ErrorControl=0`): the
+  bits then go through libv90modem's start-stop character framer
+  (`v90m_async`) instead of the V.42 endpoint. `Compression=0` keeps
+  LAPM but negotiates neither V.42bis nor V.44.
+- **Status**: after each frame the bridge copies libv90modem's state and
+  statistics (and, twice a second, the V.42 counters) into a snapshot the
+  line's thread reads for the control API.
 - **Local speaker** (`EnableLocalAudio=1`): each frame's RX and TX are
   mixed to the PC's default output through `WindowsAudioOutput`, and
   `ModemInstance` plays a dial tone and the DTMF digits when dialling,
@@ -242,10 +278,61 @@ the call's audio when PJSIP reports media active:
 
 ## Configuration keys
 
-Top level: `[Logging] Level`, `File`; `[SIP] LocalPort`. Per line:
-`ComPort`, `BaudRate`, `Identification`, `AutoAnswerRingCount`,
-`Modulations`, `EnableLocalAudio`, `SipServer`, `SipExtension`,
-`SipPassword`, `SipRealm`. See `config/voipmodem.ini.sample`.
+- `[Logging]`: `Level`, `File` (relative to the ini's folder), `RotateKB`,
+  `Keep`, `TraceAT`.
+- `[SIP]`: `LocalPort`, `Transport` (UDP/TCP), `Server` (default
+  registrar), `Realm`, `RegisterExpiry`, `RegisterOnStart`.
+- `[Media]`: `Codec`, `JitterBufferMs`, `RtpPort`, `RtpPortRange`,
+  `EchoCanceller`.
+- `[Control]`: `Port`, `BindAddress`, `Password`.
+- `[Defaults]`: any per-line modem key below; a line that leaves a key
+  out takes it from here.
+- Per line: `ComPort`, `BaudRate`, `Identification`,
+  `AutoAnswerRingCount`, `Modulations`, `ErrorControl`, `Compression`,
+  `InService`, `EnableLocalAudio`, `SipServer`, `SipExtension`,
+  `SipPassword`, `SipRealm`.
+
+See `config/voipmodem.ini.sample`. The Manager writes the ini through
+`IniDocument`, which changes only the keys it sets and keeps every
+comment, blank line and unknown key.
+
+## Service and control API
+
+`main.cpp` runs one `Application` in a console, or under the service
+control manager (`--service <ini>`; `--install` / `--uninstall` set it
+up: automatic start, restart on failure). A service's working directory
+is System32, so relative paths in the ini are taken from the ini's own
+folder. `service.restart` ends `Application::Run()` and `main` runs a
+new one in the same process (PJSIP is torn down and created again).
+
+`Application::Run()`'s thread (the "main" thread, which created the PJSIP
+endpoint) owns the list of lines. The `ControlServer` serves each client
+connection on its own thread; read-only requests (`status`, `log`,
+`system.ports`, `selftest`) answer from snapshots, and anything that
+changes lines or the ini is queued to the main thread and waited for.
+Changing settings writes the ini and then applies it the same way a
+reload does: logging at once; a line whose settings changed is rebuilt
+when it has no call (until then its state shows `*`); added and removed
+lines start and stop; SIP transport, media and control settings need a
+restart, which the API reports (`restartRequired`). Passwords are never
+returned (`passwordSet` only) and never logged. The protocol is in
+`CONTROL_API.md`.
+
+## VoIPModem Manager
+
+A Win32 program (plain API and common controls, no MFC) laid out after
+`docs/design` (the classic Windows Server 2003 look): menu, toolbar,
+the lines list, the statistics and negotiation panes, the event log and
+a status bar. It polls `status` and `log` once a second on a worker
+thread and sends operator actions as API requests; it keeps no modem
+state of its own. Dialogs: connect (host, port, password), new line and
+line properties, settings (SIP account, audio/RTP, modem defaults,
+logging, control API), loopback self-test, com0com pairs and modem
+drivers, SIP trace, AT console, about. Two things run on the Manager's
+own computer rather than through the API: the AT console (opens a COM
+port directly) and File > Start/Install service (the local service
+control manager). Its connection target and window layout are kept under
+`HKCU\Software\VoIPModem\Manager`; the password is not stored.
 
 ## Windows integration
 
@@ -273,3 +360,8 @@ does no PPP itself (see `PROJECT_SPEC.md` and the roadmap's Phase 5).
   exercised by killing the process.
 - `ATA`/`ATH` take no digit suffix; a command line over 256 characters is
   truncated; `RING` is a fixed 3 s cadence; V0 responses end in `\r\n`.
+- **Control API**: plain TCP, no TLS. It listens on 127.0.0.1 unless
+  `BindAddress` says otherwise; on any other address set `Password`, and
+  even then the traffic (password included) is readable on the network.
+- **Statistics** are counted since the service started; a restart resets
+  them. They are not persisted.

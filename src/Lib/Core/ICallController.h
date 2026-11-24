@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "CallStatus.h"
 #include "ResultCodes.h"
 
 namespace voipmodem {
@@ -75,6 +76,19 @@ public:
     // there.
     virtual void SendData(const std::vector<std::uint8_t>& bytes) = 0;
     virtual std::vector<std::uint8_t> PollReceivedData() = 0;
+
+    // Status for display (the control API). Called from the same thread
+    // as the methods above. The stub has nothing to report.
+    virtual CallStatus GetStatus() { return CallStatus{}; }
+
+    // Registers (true) or unregisters (false) the line with its telephony
+    // backend: an unregistered line receives no calls. Returns false if
+    // the backend cannot take the request now (busy with a registration
+    // already under way): the caller retries. Always true for the stub.
+    virtual bool SetRegistered(bool registered) {
+        (void)registered;
+        return true;
+    }
 };
 
 } // namespace voipmodem
