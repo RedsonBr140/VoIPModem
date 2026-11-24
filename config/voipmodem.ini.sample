@@ -59,23 +59,25 @@ LocalPort=5060
 ; AutoAnswerRingCount=1
 
 ; --- Single modem line ---
-; A bare [Modem] section configures exactly one modem line.
-[Modem]
+; A bare [Modem] section configures exactly one modem line. There is no
+; default line: with no [Modem...] section, VoIPModem opens no COM port
+; (add lines here or with VoIPModem Manager). Uncomment and set ComPort.
+; [Modem]
 ; The COM port VoIPModem opens: one side of a com0com pair. Windows'
 ; modem driver (and RAS) binds to the OTHER side of the pair.
-ComPort=COM3
+; ComPort=COM3
 
 ; DTE-to-modem serial speed on the virtual port. Not the modem-to-modem
 ; rate, which the modems negotiate and CONNECT reports.
-BaudRate=115200
+; BaudRate=115200
 
 ; Text returned by ATI.
-Identification=VoIPModem Virtual Modem
+; Identification=VoIPModem Virtual Modem
 
 ; S0 register initial value (auto-answer ring count). 0 disables
 ; auto-answer (ATA must be typed); a value > 0 answers after that many
 ; RINGs. A modem-bank line that RAS answers on its own can use either.
-AutoAnswerRingCount=0
+; AutoAnswerRingCount=0
 
 ; Modulations this line's modem offers, comma-separated: V21, V22
 ; (V.22 and V.22bis), V32BIS, V34, V90, V92, BELL103, BELL212A. Leave it

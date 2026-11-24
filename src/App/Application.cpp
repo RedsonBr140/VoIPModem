@@ -260,8 +260,13 @@ int Application::Run() {
         }
     }
     if (running == 0 && !control_) {
-        logger_.Error("No modem line could be opened and there is no control API; exiting.");
+        logger_.Error(lines_.empty() ? "No modem line is configured and there is no control API; exiting."
+                                     : "No modem line could be opened and there is no control API; exiting.");
         return 1;
+    }
+    if (lines_.empty()) {
+        logger_.Info("No modem lines configured: add one with VoIPModem Manager (Modem > New modem line) or a "
+                     "[Modem.<name>] section.");
     }
     logger_.Info(std::to_string(running) + " of " + std::to_string(lines_.size()) + " modem line(s) running." +
                  (runningAsService_ ? "" : " Press Ctrl+C to stop."));
@@ -329,6 +334,9 @@ void Application::OpenLine(Line& line) {
     std::unique_ptr<ModemInstance> old;
     if (fresh->Open()) {
         fresh->Start();
+    } else if (line.config.comPort.empty()) {
+        // Nothing to retry until the line is given a port (that rebuilds it).
+        line.nextOpenAttempt = std::chrono::steady_clock::time_point::max();
     } else {
         const std::string label = line.config.name.empty() ? line.config.comPort
                                                            : line.config.name + "/" + line.config.comPort;
@@ -1079,9 +1087,6 @@ Application::Json Application::RemoveLine(const Json& args) {
     const std::string id = StringArg(args, "id");
     Line* line = FindLine(id);
     if (line == nullptr) throw ControlError("no such line");
-    if (lines_.size() == 1) {
-        throw ControlError("the last line cannot be removed; change it instead");
-    }
     const bool force = args.contains("force") && args["force"].is_boolean() && args["force"].get<bool>();
     if (line->instance->InCall()) {
         if (!force) {

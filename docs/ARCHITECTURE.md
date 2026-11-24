@@ -105,7 +105,10 @@ Config: a bare `[Modem]` section is one unnamed line; `[Modem.<name>]`
 sections are N named lines. A line's SIP account is created and
 registered only once its COM port is open. If a port fails to open, the
 line shows "Port closed" and `Application` tries again every 30 s; the
-other lines run regardless. `InService=0` keeps a line unregistered (its
+other lines run regardless. There is no default line or port: an ini
+without `[Modem...]` sections runs no lines (the control API still runs,
+so lines can be added from the Manager), and a section without
+`ComPort=` shows "No COM port" and opens nothing. `InService=0` keeps a line unregistered (its
 port stays open).
 
 Each line keeps a status snapshot (refreshed twice a second: state,

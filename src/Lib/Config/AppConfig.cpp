@@ -123,17 +123,13 @@ AppConfig LoadAppConfig(const IniConfig& ini) {
         if (!IsModemSection(sectionName, instanceName)) {
             continue;
         }
-        ModemInstanceConfig base = defaults;
-        base.comPort = ModemInstanceConfig{}.comPort;
-        ModemInstanceConfig modem = ReadLine(ini, sectionName, base);
+        ModemInstanceConfig modem = ReadLine(ini, sectionName, defaults); // no ComPort= -> empty, never a guess
         modem.name = instanceName;
         config.modems.push_back(std::move(modem));
     }
 
-    if (config.modems.empty()) {
-        config.modems.push_back(ModemInstanceConfig{}); // no INI / no [Modem...] section: one default line
-    }
-
+    // No [Modem...] section: no lines. Nothing opens a COM port nobody
+    // configured; lines can be added later (ini, or the Manager).
     return config;
 }
 

@@ -84,6 +84,11 @@ ModemInstance::~ModemInstance() {
 }
 
 bool ModemInstance::Open() {
+    if (config_.comPort.empty()) {
+        logger_.Error("No ComPort= in this line's section: it stays closed until one is set.");
+        RefreshStatus();
+        return false;
+    }
     if (!serialPort_.Open(config_.comPort, config_.baudRate)) {
         RefreshStatus();
         return false;
@@ -376,8 +381,13 @@ void ModemInstance::RefreshStatus() {
         s.kind = kind;
     };
     if (!s.portOpen) {
-        set("Port closed", "err");
-        s.fault = "cannot open " + config_.comPort;
+        if (config_.comPort.empty()) {
+            set("No COM port", "err");
+            s.fault = "ComPort is not set for this line";
+        } else {
+            set("Port closed", "err");
+            s.fault = "cannot open " + config_.comPort;
+        }
     } else if (state == ModemState::OnlineData) {
         set("Connected", "up");
     } else if (call_.active && call_.connected && state == ModemState::CommandMode) {

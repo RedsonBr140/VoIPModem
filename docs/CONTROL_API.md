@@ -66,7 +66,7 @@ Everything the Manager's main window shows. Result:
 |---|---|
 | `id` | line name (`[Modem.<id>]`; `""` for a bare `[Modem]`) |
 | `comPort`, `extension`, `server` | as configured |
-| `state` | `Waiting`, `Idle (AT)`, `Ringing`, `Answering`, `Dialing`, `Handshake`, `Connected`, `Online command`, `Hanging up`, `No carrier`, `Port closed`, `Not registered`, `SIP error`, `Out of service`, `Unregistered`, `No SIP` |
+| `state` | `Waiting`, `Idle (AT)`, `Ringing`, `Answering`, `Dialing`, `Handshake`, `Connected`, `Online command`, `Hanging up`, `No carrier`, `Port closed`, `No COM port`, `Not registered`, `SIP error`, `Out of service`, `Unregistered`, `No SIP` |
 | `kind` | `up` (connected), `neg` (ringing to training), `idle`, `err`, `off` |
 | `direction` | `in`, `out`, or `""` without a call |
 | `remoteParty` | caller or called number |
@@ -109,7 +109,7 @@ lines; a `last` below what a client has seen means the service restarted.
 | `line.service` | `inService`, optional `id` (else every line) | writes `InService=` to the ini; out of service = hang up and unregister |
 | `line.add` | `line` | adds `[Modem.<id>]` and starts it; result `id` |
 | `line.update` | `id`, `line` | writes the given keys; applied now, or when the call ends (`deferred`) |
-| `line.remove` | `id`, optional `force` | removes the section; refused during a call unless `force`; the last line cannot be removed |
+| `line.remove` | `id`, optional `force` | removes the section; refused during a call unless `force` |
 
 A `line` object may hold: `id` (add only; default `Line<n>`; letters,
 digits, `-`, `_`), `comPort`, `sipExtension`, `sipPassword` (written only

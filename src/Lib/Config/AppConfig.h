@@ -18,7 +18,7 @@ struct ModemInstanceConfig {
     // Labels the line's log lines (TaggedLogger) and identifies it in the
     // control API.
     std::string name;
-    std::string comPort = "COM3";
+    std::string comPort; // required: a line without one stays closed ("ComPort is not set")
     int baudRate = 115200;
     std::string modemIdentification = "VoIPModem Virtual Modem";
     int autoAnswerRingCount = 0; // S0; 0 = auto-answer disabled
@@ -88,9 +88,8 @@ struct AppConfig {
     std::string controlBindAddress = "127.0.0.1";
     std::string controlPassword;               // empty = no authentication
 
-    // One entry per modem line to run. Always has at least one entry —
-    // LoadAppConfig() falls back to a single default instance if the INI
-    // defines none, matching pre-multi-instance Phase 1 behavior.
+    // One entry per [Modem] / [Modem.<name>] section; empty if there are
+    // none (there is no made-up default line).
     std::vector<ModemInstanceConfig> modems;
 };
 
