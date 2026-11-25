@@ -8,8 +8,8 @@ Studio build.
 **Status: VoIPModem builds and runs on Linux. Two of its lines, registered
 with Asterisk, called each other through the PBX (V.92, V.42 LAPM,
 V.44), and pppd, both directly and started by mgetty, ran PPP over that
-call. Not yet tested with a physical modem or with PPP
-authentication.** Each item below says whether it is done, in progress
+call, with pppd's local PAP, CHAP and MS-CHAPv2 authentication. Not yet
+tested with a physical modem or with FreeRADIUS.** Each item below says whether it is done, in progress
 or planned; "done" means it was built and run on Linux, not only
 written.
 
@@ -144,10 +144,12 @@ open the old PTY just before it is closed.
 
 ## Dial-in with pppd
 
-What was run live (see "Live results"). **Both used `noauth`, which is for
-testing only**: a real dial-in server needs authentication (PAP/CHAP, for
-example against FreeRADIUS through pppd's RADIUS plugin), which has not
-been tried.
+What was run live (see "Live results"). The examples below use
+`noauth`, which is for testing only. With pppd's local authentication
+(`auth`, `name <server>`, and the callers in `/etc/ppp/pap-secrets` and
+`/etc/ppp/chap-secrets`), PAP, CHAP and MS-CHAPv2 were each verified over
+a call, and a wrong password was refused. FreeRADIUS, through pppd's
+RADIUS plugin, has not been tried.
 
 **pppd directly.** pppd waits for `RING` and answers:
 
@@ -197,7 +199,9 @@ modems are libv90modem.
 | pppd client (A, in its own network namespace) to pppd server (B) | IPCP up in 20 s; ping over the modem link, 0% loss, RTT about 600 ms |
 | The client pppd killed (no LCP terminate) | A hangs up (`&D2`); B's carrier drop hangs up the server pppd ("Modem hangup") |
 | mgetty on B (AutoPPP) instead of the pppd server | mgetty answers; its pppd brings IPCP up in 23 s; ping 0% loss; hung up with SIGHUP ("Modem hangup") when the client is killed |
-| Passwords | Not in the log, at `Level=Debug` with the SIP trace |
+| pppd server with local authentication (`auth require-pap`, `require-chap`, `require-mschap-v2`; secrets in `/etc/ppp`) | Each method: peer authenticated (MS-CHAPv2 confirmed in LCP as `<auth chap MS-v2>`), IPCP up in 20 s, ping 0% loss |
+| The same with a wrong client password (CHAP) | Refused: "Peer vmtest failed CHAP authentication", no address, connection terminated |
+| Passwords | SIP passwords not in the log, at `Level=Debug` with the SIP trace; the PPP secret not in VoIPModem's log either |
 
 At shutdown, each line logs `Unable to create/send REGISTER: Object is
 busy (PJSIP_EBUSY)` while it un-registers; it is the same harmless
@@ -230,7 +234,7 @@ way by default) and the modems' own delay.
 | 2 | `PtySerialPort` (`ISerialPort` on a PTY) with the emulation above, and unit tests that open the slave side | **Done** 2026-11-25: 10 PTY tests (170 in all) pass on Debian 13, 30 runs without a failure |
 | 3 | Linux entry point: foreground process, SIGTERM/SIGINT, systemd unit; Linux versions of the platform-specific parts of `Application` | **Done** 2026-11-25, except that the systemd unit has not been tried |
 | 4 | Live test: AT commands through a terminal program on the symlink, SIP registration with Asterisk, a modem call to `CONNECT` | **Done** 2026-11-25: AT commands; registration; V.92 calls between two lines through Asterisk |
-| 5 | A dial-in setup with pppd on the PTY (authentication such as FreeRADIUS), documented | **Partly done**: pppd and mgetty + AutoPPP verified through Asterisk, without authentication. Authentication and FreeRADIUS not yet tested |
+| 5 | A dial-in setup with pppd on the PTY (authentication such as FreeRADIUS), documented | **Partly done**: pppd and mgetty + AutoPPP verified through Asterisk; pppd's local PAP, CHAP and MS-CHAPv2 authentication verified. FreeRADIUS not yet tested |
 | 6 | Release packaging for Linux | Planned |
 
 ## Windows-specific code to port
@@ -260,7 +264,8 @@ From a survey of `src/App` and `src/Lib` (the Manager stays Windows-only):
 - A far end other than VoIPModem itself: a physical modem through the
   FXS gateway, a legacy client dialling in, a SIP softmodem such as
   BinModem.
-- PPP authentication (PAP/CHAP), FreeRADIUS.
+- FreeRADIUS (pppd's RADIUS plugin). Authentication through mgetty's
+  AutoPPP (only pppd started directly was tried with authentication).
 - The systemd unit; running VoIPModem as a user other than the one that
   opened the ports in the tests.
 - Several simultaneous calls on Linux beyond the two-line loop.
