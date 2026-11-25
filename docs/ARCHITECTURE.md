@@ -130,7 +130,9 @@ Received bytes from `PollReceivedData()` are written to the port.
 `PollEvent()` is polled every iteration and routed through
 `ModemStateMachine::HandleCallEvent()` to produce `RING`,
 `CONNECT <rate>`, `NO CARRIER`, `BUSY` or `NO ANSWER`. `RING` repeats every
-3 s while a call alerts, and S0 auto-answer runs `ATA` after S0 rings.
+3 s while a call alerts, and S0 auto-answer runs `ATA` after S0 rings
+(not while the DTE's DTR is low, unless `&D0`; see "Serial control
+signals").
 
 ## Hayes command set
 
@@ -161,14 +163,19 @@ Received bytes from `PollReceivedData()` are written to the port.
 Windows' generic modem driver (`mdmgen.inf`, "Standard 56000 bps Modem")
 sends `AT&FE0V1&C1&D2S95=47S0=0` and `ATS7=60L0M1&K3N1X4` when RAS opens
 the line, and closes the line if either returns `ERROR`. Both now return
-`OK`. These commands are **accepted and stored, not honored**: the value
-goes into `ModemProfile` (reset by `AT&F` and `ATZ`) and changes nothing
-about how the modem behaves.
+`OK`. Each value goes into `ModemProfile` (reset by `AT&F` and `ATZ`).
+`&C` and `&D` are **honored** (see "Serial control signals" below):
+
+| Command | Accepted | Factory | What it does |
+|---|---|---|---|
+| `AT&Cn` | 0-1 | 1 | DCD always on (`&C0`), or only while the modem data link is up (`&C1`) |
+| `AT&Dn` | 0-3 | 2 | On a DTR drop: ignore, online command mode, hang up, hang up and reset |
+
+The rest are **accepted and stored, not honored**: changing them changes
+nothing about how the modem behaves.
 
 | Command | Accepted | Factory | What honoring it would mean (not done) |
 |---|---|---|---|
-| `AT&Cn` | 0-1 | 1 | Drive DCD: always on, or only while the modem link is up |
-| `AT&Dn` | 0-3 | 2 | Act on DTR drop: ignore, command mode, hang up, hang up and reset |
 | `AT&Kn` | 0, 3-6 | 3 | Flow control: none, RTS/CTS, XON/XOFF, transparent XON/XOFF, both |
 | `ATXn` | 0-4 | 4 | Choose the result-code set; today the full set is always used |
 | `ATNn` | 0-1 | 1 | Fixed rate (S37) or negotiate; today `Modulations=` alone decides |
@@ -183,6 +190,80 @@ sends `ATH<cr>`. In command mode the `+` bytes are ordinary line
 characters, so the line reads `+++ATH`. The parser skips a leading run of
 `+` when `AT` follows it, so that line runs as `ATH`. A line of only `+`,
 or `+` followed by anything but `AT`, is still `ERROR`.
+
+### Serial control signals
+
+VoIPModem's port is the modem (DCE) end of the line, but a com0com pair
+is two DTE-style ports wired back to back: there is no DCD output to
+drive. With com0com's **default wiring** each port's DTR drives the other
+port's DSR and DCD, and RTS drives the other's CTS. So:
+
+| Signal on the driver's port | Comes from | Means |
+|---|---|---|
+| DCD | VoIPModem's DTR | Carrier, per `AT&C` |
+| DSR | VoIPModem's DTR | Same as DCD (side effect, see below) |
+| CTS | VoIPModem's RTS | Always on (no flow control, `&K` not honored) |
+
+| Signal on VoIPModem's port | Comes from | Means |
+|---|---|---|
+| DSR | The driver's DTR | DTE ready, acted on per `AT&D` |
+
+`WindowsSerialPort` opens the port with `DTR_CONTROL_DISABLE`, so DTR
+starts low and moves only through `SetDtr()` (`EscapeCommFunction`
+`SETDTR`/`CLRDTR`); RTS stays on. `ReadDsr()` reads `GetCommModemStatus`
+`MS_DSR_ON`. Both are long-standing Win32 calls, present on XP and
+Server 2003.
+
+The decisions are in `ModemStateMachine`; `ModemInstance` only moves them
+to and from the port:
+
+- **Carrier** (`CarrierAsserted()`): `&C0` always; `&C1` only while the
+  data link is up, from `CONNECT` until the call ends, including online
+  command mode after `+++`. Off at idle, while ringing, dialing and
+  training. `ModemInstance` sets DTR to match every loop iteration, and
+  straight after each call event, before writing its result, so DCD is
+  up before `CONNECT` and down before `NO CARRIER`.
+- **DTR drop** (`HandlePeerDtrChange()`): the driver's DTR is polled once
+  per loop iteration (at least every 200 ms, the read timeout) and
+  debounced by `DtrDebouncer`: a drop counts only after reading low for
+  50 ms on two or more samples, so a glitch as either side opens or
+  closes is ignored. It is acted on only while a call is in progress:
+  dialing, answering after `ATA` or auto-answer, training, online, or
+  online command mode. A call that is only ringing is left ringing.
+  - `&D0`: ignored.
+  - `&D1`: in online data, back to command mode with the call up, `OK`.
+    Otherwise nothing.
+  - `&D2`: hang up and return to command mode. `NO CARRIER` follows from
+    the call controller's `Ended` event, as after `ATH`.
+  - `&D3`: as `&D2`, then reset as `ATZ` (with or without a call). Like
+    `ATZ`, that sets S0 back to 0, so the line stops auto-answering.
+- **Auto-answer** (`AutoAnswerAllowed()`): not while DTR is low, unless
+  `&D0`. `RING` is still sent. The level read when the port opens counts
+  as a starting point, not a drop.
+
+Known side effects and limits:
+
+- **DSR on the driver side follows DCD.** With the default wiring the
+  driver sees DSR off whenever there is no carrier (under `&C1`, that is
+  whenever there is no call). Windows' "Standard Modem Types" driver is
+  not known to require DSR, but other software that checks DSR before
+  talking to a modem will see one that is "not ready" at idle. Use
+  `AT&C0` for such software, or remap the driver side's DSR in com0com so
+  that it means "VoIPModem's port is open" instead. com0com's `setupc`
+  has per-port pin options for this; check `setupc help` on the machine
+  for the exact option name and values, which have not been verified for
+  this document. Leave DCD on its default (the other port's DTR), or
+  carrier stops working.
+- **No DTE means no auto-answer.** When nothing has the driver-side port
+  open, com0com reports its DTR as off, so under the factory `&D2` an
+  incoming call rings without being answered. That is what a real modem
+  does; a line that should answer with nothing attached needs `AT&D0`
+  (which `ATZ`/`AT&F` undo). A real COM port with no DSR wired behaves
+  the same way.
+- **Closing the Manager's AT console during a call hangs it up**: the
+  console opens the driver side with DTR on and closing it drops DTR.
+- RTS/CTS flow control (`&K3`) and the Ring Indicator pin are not
+  driven.
 
 ## SIP (PjsipEndpoint, PjsipCallController)
 
@@ -388,6 +469,9 @@ does no PPP itself (see `PROJECT_SPEC.md` and the roadmap's Phase 5).
   modem that spends longer on V.8bis before ANSam is missed.
 - **No call-audio recording** on our side yet, so a failed call can only
   be diagnosed from logs and the far end's capture.
+- **Serial control signals**: DCD and DTR follow `&C`/`&D` (see "Serial
+  control signals"); DSR on the driver side follows DCD, and RTS/CTS and
+  RI are not driven.
 - **Escape sequence**: online data mode passes every byte to the modem
   except a valid `+++`; there is no `S2`/`S12` configurability.
 - **Ctrl+C shutdown** with several lines and calls up has only been

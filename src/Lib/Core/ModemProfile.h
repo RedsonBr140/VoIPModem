@@ -22,10 +22,14 @@ namespace voipmodem {
 // AT&C, AT&D, AT&K, ATX and ATN follow the same precedent. Windows'
 // generic modem driver (mdmgen.inf, "Standard 56000 bps Modem") sends
 // "AT&FE0V1&C1&D2S95=47S0=0" and "ATS7=60L0M1&K3N1X4" when RAS opens the
-// line, and closes the line if either gets ERROR. Each value below is
-// ACCEPTED AND STORED, NOT YET HONORED: changing it changes nothing about
-// how the modem behaves. Factory defaults are the common Hayes-compatible
-// (Rockwell/Conexant-style) data-modem profile: &C1 &D2 &K3 X4 N1.
+// line, and closes the line if either gets ERROR. &C and &D are honored
+// (ModemStateMachine::CarrierAsserted() / HandlePeerDtrChange(), driven
+// by ModemInstance through the serial port's DTR and DSR lines; see
+// docs/ARCHITECTURE.md "Serial control signals"). &K, X and N are
+// ACCEPTED AND STORED, NOT YET HONORED: changing them changes nothing
+// about how the modem behaves. Factory defaults are the common
+// Hayes-compatible (Rockwell/Conexant-style) data-modem profile:
+// &C1 &D2 &K3 X4 N1.
 struct ModemProfile {
     bool echoEnabled = true;
     bool verboseResultCodes = true;
@@ -33,14 +37,14 @@ struct ModemProfile {
     int speakerVolume = 2;  // ATLn, 0-3
     int speakerMode = 1;    // ATMn, 0-3
 
-    // AT&Cn, 0-1. Accepted and stored, not yet honored. Honoring it means
-    // driving the serial port's DCD line: &C0 = DCD always on, &C1 = DCD
-    // on only while a modem data link is up.
+    // AT&Cn, 0-1. &C0 = DCD always on, &C1 = DCD on only while a modem
+    // data link is up (online, or online command mode after "+++").
     int dcdMode = 1;
 
-    // AT&Dn, 0-3. Accepted and stored, not yet honored. Honoring it means
-    // acting on the DTE dropping DTR: &D0 = ignore, &D1 = return to command
-    // mode with the call up, &D2 = hang up, &D3 = hang up and reset (ATZ).
+    // AT&Dn, 0-3. What to do when the DTE drops DTR: &D0 = ignore,
+    // &D1 = return to command mode with the call up, &D2 = hang up,
+    // &D3 = hang up and reset (ATZ). Under &D1-&D3, no S0 auto-answer
+    // while DTR is low.
     int dtrMode = 2;
 
     // AT&Kn, 0/3/4/5/6. Accepted and stored, not yet honored. Honoring it
