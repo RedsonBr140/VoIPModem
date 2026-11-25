@@ -5,10 +5,12 @@ host platform after release 0.0.2 (see `PROJECT_SPEC.md` section 3,
 "Linux"). Windows remains the primary platform and keeps its Visual
 Studio build.
 
-**Status: the library (with the PTY serial port) and its unit tests build
-and pass on Linux; there is no Linux executable yet.** Each item below
-says whether it is done, in progress or planned; "done" means it was
-built and run on Linux, not only written.
+**Status: VoIPModem builds and runs on Linux. Two of its lines called each
+other through its own SIP endpoint (V.92), and pppd, both directly and
+started by mgetty, ran PPP over that call. Not yet tested through
+Asterisk, with a physical modem, or with authentication.** Each item
+below says whether it is done, in progress or planned; "done" means it
+was built and run on Linux, not only written.
 
 ## Building
 
@@ -30,8 +32,31 @@ ctest --test-dir build-linux --output-on-failure
   uses is built: SIP, RTP, G.711 and the null sound device. There is no
   SSL, video, ALSA, or codec that needs a system library.
 - libv90modem is built by its own `Makefile`, into the build directory.
-- Targets: `voipmodem_lib` (static library) and `voipmodem_tests` (the
-  same unit tests as on Windows).
+- Targets: `voipmodem` (the modem bank), `voipmodem_lib` (static
+  library) and `voipmodem_tests` (the Windows unit tests plus the PTY
+  tests).
+
+## Running
+
+```sh
+build-linux/voipmodem /path/to/voipmodem.ini
+```
+
+- The same `voipmodem.ini` as on Windows, except that each line's
+  `ComPort=` is the path where VoIPModem publishes the line's port (see
+  "PTY serial side"), for example `ComPort=/run/voipmodem/ttyVM0`.
+- Runs in the foreground; SIGINT or SIGTERM stops it cleanly. The log
+  goes to the `[Logging] File` and to standard output.
+- No `--install`. For systemd, `config/voipmodem.service` runs
+  `/usr/local/bin/voipmodem /etc/voipmodem/voipmodem.ini` (installed with
+  `sudo cmake --install build-linux`), and creates `/run/voipmodem` for
+  the ports. Its comments list the steps. **The unit file has not been
+  tried yet.**
+- The control API works as on Windows (`hello` reports
+  `"platform": "Linux, 64-bit"`). The Manager's port and modem-driver
+  windows stay empty: there are no COM ports or modem drivers to list.
+- `EnableLocalAudio` is ignored, with a warning: there is no modem
+  speaker on Linux.
 
 ## Scope
 
@@ -60,8 +85,7 @@ Out of scope, as on Windows (`ARCHITECTURE.md`):
 
 ## PTY serial side
 
-`src/Lib/Serial/PtySerialPort` (built; not yet used by an executable,
-which is increment 3).
+`src/Lib/Serial/PtySerialPort`.
 
 Each line's `ComPort=` names a path, for example `/run/voipmodem/ttyVM0`.
 VoIPModem creates a PTY with `openpty()`, keeps the master side, closes
@@ -113,14 +137,68 @@ tests in `tests/PtySerialPortTests.cpp`:
 - data queued for an unread slave survives the slave's close and is not
   removed by `tcflush` on the master.
 
-Open:
+Open: **races.** A program that closes the port and reopens it within
+microseconds may still find unread output, or, after a carrier drop, may
+open the old PTY just before it is closed.
 
-- **pppd and mgetty on a PTY.** pppd may need its `local` option;
-  mgetty checks DCD with `TIOCMGET`, which PTYs do not support. Both need
-  live testing (increment 5).
-- **Races.** A program that closes the port and reopens it within
-  microseconds may still find unread output, or, after a carrier drop,
-  may open the old PTY just before it is closed.
+## Dial-in with pppd
+
+What was run live (see "Live results"). **Both used `noauth`, which is for
+testing only**: a real dial-in server needs authentication (PAP/CHAP, for
+example against FreeRADIUS through pppd's RADIUS plugin), which has not
+been tried.
+
+**pppd directly.** pppd waits for `RING` and answers:
+
+```sh
+pppd /run/voipmodem/ttyVM1 115200 noauth nodetach \
+  10.250.250.1:10.250.250.2 \
+  connect '/usr/sbin/chat -v TIMEOUT 5 "" ATZ OK "" TIMEOUT 90 RING ATA TIMEOUT 60 CONNECT ""'
+```
+
+- pppd's default `modem` mode works: it does **not** need `local`. When
+  the call ends, the carrier-drop emulation hangs it up and it logs
+  "Modem hangup".
+- The line's `AutoAnswerRingCount` should be 0 (the default); pppd's
+  chat answers.
+
+**mgetty with AutoPPP.** mgetty answers and starts pppd when the caller
+sends PPP frames:
+
+- mgetty only opens devices under `/dev`. Link one there:
+  `ln -s /run/voipmodem/ttyVM1 /dev/ttyVM1`, and run `mgetty ttyVM1`. The
+  link follows VoIPModem's symlink, so it survives the PTY being
+  replaced.
+- In `/etc/mgetty/mgetty.config`, a section for the port (`port ttyVM1`,
+  `data-only yes`, `speed 115200`).
+- The `/AutoPPP/` line of `login.config` starts pppd (the test used
+  `/usr/sbin/pppd noauth 10.250.250.1:10.250.250.2`).
+- mgetty logs `TIOCMGET failed` and `TIOCMBIC failed: Inappropriate ioctl
+  for device` (it reads the modem lines and drops DTR to reset the
+  modem). Both are harmless: it carries on, sends its init string, waits
+  for `RING`, answers with `ATA` and starts pppd.
+- When the call ends, the pppd that mgetty started gets SIGHUP ("Modem
+  hangup"), as with a real modem.
+
+## Live results (2026-11-25)
+
+On the test host, without Asterisk: one VoIPModem process with two lines,
+line A calling line B (`ATDT200`) through VoIPModem's own SIP endpoint
+(`[SIP] Server=127.0.0.1:<LocalPort>`, `RegisterOnStart=0`). Both modems
+are libv90modem.
+
+| Test | Result |
+|---|---|
+| AT commands over the PTY (terminal program in raw mode) | `AT`, `ATI`, `AT&C1&D2`, `ATS0?`, `ATH` answered; open and close seen as the DTE's DTR |
+| Control API `hello` | Answered; platform "Linux, 64-bit" |
+| SIGTERM | Clean shutdown; symlinks removed |
+| A calls B, B auto-answers (S0=1) | `RING`, then **V.92** 53333/41333 bit/s both ways; data intact in both directions; `+++`, `ATH`; B gets `NO CARRIER` |
+| pppd client (A, in its own network namespace) to pppd server (B) | IPCP up in 20 s; ping over the modem link, 0% loss, RTT 400-600 ms |
+| The client pppd killed (no LCP terminate) | A hangs up (`&D2`); B's carrier drop hangs up the server pppd ("Modem hangup") |
+| mgetty on B (AutoPPP) instead of pppd | mgetty answers; its pppd brings IPCP up in 23 s; ping 0% loss; hung up with SIGHUP when the client is killed |
+
+The round trip time includes both lines' jitter buffers (160 ms each
+way by default) and the modems' own delay.
 
 ## Increments
 
@@ -128,32 +206,38 @@ Open:
 |---|---|---|
 | 1 | CMake build of libv90modem, PJSIP and the VoIPModem library; the unit tests pass on Linux; an Ubuntu CI job | **Done** 2026-11-25: 160 tests pass on Debian 13 (Release and Debug) |
 | 2 | `PtySerialPort` (`ISerialPort` on a PTY) with the emulation above, and unit tests that open the slave side | **Done** 2026-11-25: 10 PTY tests (170 in all) pass on Debian 13, 30 runs without a failure |
-| 3 | Linux entry point: foreground process, SIGTERM/SIGINT, systemd unit; Linux versions of the platform-specific parts of `SystemInfo` and `Application` | Planned |
-| 4 | Live test: AT commands through a terminal program on the symlink, SIP registration with Asterisk, a modem call to `CONNECT` | Planned |
-| 5 | A dial-in setup with pppd on the PTY (authentication such as FreeRADIUS), documented | Planned |
+| 3 | Linux entry point: foreground process, SIGTERM/SIGINT, systemd unit; Linux versions of the platform-specific parts of `Application` | **Done** 2026-11-25, except that the systemd unit has not been tried |
+| 4 | Live test: AT commands through a terminal program on the symlink, SIP registration with Asterisk, a modem call to `CONNECT` | **Partly done**: AT commands and modem calls to `CONNECT` between two lines, without Asterisk. Registration and calls through Asterisk not yet tested |
+| 5 | A dial-in setup with pppd on the PTY (authentication such as FreeRADIUS), documented | **Partly done**: pppd and mgetty + AutoPPP verified without authentication. Authentication and FreeRADIUS not yet tested |
 | 6 | Release packaging for Linux | Planned |
 
 ## Windows-specific code to port
 
 From a survey of `src/App` and `src/Lib` (the Manager stays Windows-only):
 
-| Code | What it uses | Linux plan |
+| Code | What it uses | Linux |
 |---|---|---|
-| `Lib/Serial/WindowsSerialPort` | Win32 COM API | Done: `PtySerialPort`; used once the Linux entry point exists (increment 3) |
-| `App/main.cpp` | Windows service, console Ctrl+C handler | Signal handling and systemd (increment 3) |
-| `Lib/Control/SystemInfo.cpp` | Registry: COM ports and modem drivers | List the lines' PTYs instead (increment 3) |
-| `Lib/Audio/WindowsAudioOutput` | waveOut | Done: not built on Linux; `CallAudioBridge` logs that `EnableLocalAudio` is ignored |
+| `Lib/Serial/WindowsSerialPort` | Win32 COM API | Done: `PtySerialPort`, chosen in `ModemInstance.h` |
+| `App/main.cpp` | Windows service, console Ctrl+C handler | Done: `App/main_linux.cpp` (signals) and `config/voipmodem.service` |
+| `Lib/Control/SystemInfo.cpp` | Registry: COM ports and modem drivers | Left empty on Linux; the lines' PTYs are not listed yet |
+| `Lib/Audio/WindowsAudioOutput` | waveOut | Done: not built on Linux; `EnableLocalAudio` is logged and ignored |
 | `Lib/Sip/PjsipEndpoint.cpp` | `timeBeginPeriod` | Done: Windows only |
 | `Lib/Logging/Logger.cpp`, `Lib/Config/IniDocument.cpp` | A few `_WIN32` sections | Done: they already had POSIX branches, now built on Linux |
-| `App/Application.cpp` | A few `_WIN32` sections | Increment 3 |
+| `App/Application.cpp` | Host name, CPU time, processor count, platform name | Done: POSIX branches |
 | `Lib/Control/ControlServer.cpp` | Sockets | Done: its POSIX branch passes the control API tests over loopback |
 | `tests/ControlTests.cpp` | Winsock test client | Done: POSIX branch |
 
 ## Test environment
 
 - Debian 13 (trixie), x86_64, kernel 6.12, gcc 14.2, CMake 3.31.
-- The same Asterisk server used for the Windows tests.
+- ppp 2.5.2 and mgetty 1.2.1 from Debian.
 
 ## Not tested
 
-Everything on this page, until the status column says otherwise.
+- Registration and calls through Asterisk; any call that leaves the host.
+- A physical modem or a legacy client dialling in.
+- PPP authentication (PAP/CHAP), FreeRADIUS.
+- The systemd unit; running VoIPModem as a user other than the one that
+  opened the ports in the tests.
+- Several simultaneous calls on Linux beyond the two-line loop.
+- Distributions other than Debian 13, and CPUs other than x86_64.

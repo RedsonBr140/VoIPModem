@@ -1,0 +1,32 @@
+# systemd unit for VoIPModem on Linux (docs/LINUX.md).
+#
+#   sudo cmake --install build-linux            # /usr/local/bin/voipmodem
+#   sudo install -D -m 600 voipmodem.ini /etc/voipmodem/voipmodem.ini
+#   sudo cp config/voipmodem.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now voipmodem
+#   journalctl -u voipmodem -f
+#
+# Each line's ComPort= should be under /run/voipmodem (for example
+# /run/voipmodem/ttyVM0): systemd creates that directory at start and
+# removes it, with the symlinks, at stop.
+
+[Unit]
+Description=VoIPModem modem bank
+Documentation=https://github.com/RedsonBr140/VoIPModem
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/voipmodem /etc/voipmodem/voipmodem.ini
+RuntimeDirectory=voipmodem
+RuntimeDirectoryMode=0755
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+# Runs as root by default. The pseudo-terminals are owned by the user
+# VoIPModem runs as, so pppd/mgetty must run as that user or as root.
+
+[Install]
+WantedBy=multi-user.target

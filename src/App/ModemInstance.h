@@ -11,7 +11,6 @@
 #include <thread>
 
 #include "CommandLineSession.h"
-#include "../Lib/Audio/WindowsAudioOutput.h"
 #include "../Lib/Config/AppConfig.h"
 #include "../Lib/Control/LineStatus.h"
 #include "../Lib/Control/ServiceStats.h"
@@ -20,10 +19,31 @@
 #include "../Lib/Core/ModemStateMachine.h"
 #include "../Lib/Logging/Logger.h"
 #include "../Lib/Logging/TaggedLogger.h"
-#include "../Lib/Serial/WindowsSerialPort.h"
 #include "../Lib/Sip/PjsipEndpoint.h"
 
+#ifdef _WIN32
+#include "../Lib/Audio/WindowsAudioOutput.h"
+#include "../Lib/Serial/WindowsSerialPort.h"
+#else
+#include <vector>
+#include "../Lib/Dsp/DspTypes.h"
+#include "../Lib/Serial/PtySerialPort.h"
+#endif
+
 namespace voipmodem {
+
+// The platform's serial port and sound output for a line: a COM port
+// (com0com) and waveOut on Windows; a pseudo-terminal and no sound on
+// Linux (docs/LINUX.md).
+#ifdef _WIN32
+using LineSerialPort = WindowsSerialPort;
+using LineAudioOutput = WindowsAudioOutput;
+#else
+using LineSerialPort = PtySerialPort;
+struct LineAudioOutput {
+    void Write(const std::vector<dsp::Sample>&) {}
+};
+#endif
 
 class PjsipCallController;
 
@@ -167,7 +187,7 @@ private:
     ServiceStats& stats_;
     TaggedLogger logger_;
     PjsipEndpoint* sipEndpoint_; // nullable; non-owning
-    WindowsSerialPort serialPort_;
+    LineSerialPort serialPort_;
     // Declared before callController_: its factory sets it, so it must
     // already be initialised (to nullptr) by then.
     PjsipCallController* sip_ = nullptr; // callController_ when it is the SIP one
@@ -188,7 +208,7 @@ private:
     // Local dial-tone/DTMF cue (see PlayDialSequence). Only constructed
     // if config_.enableLocalAudio -- same per-line opt-in flag as
     // CallAudioBridge's own local speaker monitor.
-    std::optional<WindowsAudioOutput> dialAudio_;
+    std::optional<LineAudioOutput> dialAudio_;
     std::thread dialAudioThread_;
     ModemState lastObservedState_ = ModemState::CommandMode;
 

@@ -121,6 +121,17 @@ target_link_libraries(voipmodem_lib PUBLIC Pj::pjsua2 libv90modem)
 # Designated-style partial initialisers of AtCommand are deliberate.
 target_compile_options(voipmodem_lib PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
 
+# --- The modem bank ------------------------------------------------------------
+add_executable(voipmodem
+  src/App/main_linux.cpp
+  src/App/Application.cpp
+  src/App/CommandLineSession.cpp
+  src/App/ModemInstance.cpp
+)
+target_link_libraries(voipmodem PRIVATE voipmodem_lib)
+target_compile_options(voipmodem PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
+install(TARGETS voipmodem RUNTIME DESTINATION bin)
+
 # --- Unit tests ----------------------------------------------------------------
 add_executable(voipmodem_tests
   tests/main.cpp

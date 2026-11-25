@@ -10,6 +10,9 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <sys/resource.h>
+#include <unistd.h>
 #endif
 
 #include "../Lib/Config/IniConfig.h"
@@ -90,6 +93,11 @@ std::string HostName() {
     if (GetComputerNameA(name, &size)) {
         return std::string(name, size);
     }
+#else
+    char name[256] = {};
+    if (gethostname(name, sizeof name - 1) == 0) {
+        return name;
+    }
 #endif
     return "";
 }
@@ -104,6 +112,14 @@ std::uint64_t ProcessCpuTime() {
         };
         return value(kernel) + value(user);
     }
+#else
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) == 0) {
+        const auto value = [](const timeval& tv) {
+            return static_cast<std::uint64_t>(tv.tv_sec) * 10000000u + static_cast<std::uint64_t>(tv.tv_usec) * 10u;
+        };
+        return value(usage.ru_utime) + value(usage.ru_stime);
+    }
 #endif
     return 0;
 }
@@ -114,7 +130,8 @@ unsigned ProcessorCount() {
     GetSystemInfo(&info);
     return info.dwNumberOfProcessors > 0 ? info.dwNumberOfProcessors : 1;
 #else
-    return 1;
+    const long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return n > 0 ? static_cast<unsigned>(n) : 1;
 #endif
 }
 
@@ -208,11 +225,20 @@ AppConfig Application::LoadConfigFile() const {
 }
 
 int Application::Run() {
+#ifdef _WIN32
     logger_.SetConsoleEcho(!runningAsService_);
+#else
+    logger_.SetConsoleEcho(true); // under systemd, standard output is the journal
+#endif
     logger_.Init(config_.logLevel, config_.logFilePath, static_cast<std::uint64_t>(config_.logRotateKB) * 1024,
                  config_.logKeepFiles);
     logger_.Info(std::string("VoIPModem ") + VOIPMODEM_VERSION + " starting" +
-                 (runningAsService_ ? " as a Windows service" : "") + " (config " + configPath_ +
+#ifdef _WIN32
+                 (runningAsService_ ? " as a Windows service" : "") +
+#else
+                 (runningAsService_ ? " as a service" : "") +
+#endif
+                 " (config " + configPath_ +
                  "; modem engine: libv90modem " + ModemEngineVersion() + ")");
 
     if (config_.sipLocalPort > 0) {
@@ -676,6 +702,8 @@ Application::Json Application::Hello() {
     const char* platform = "Windows, 64-bit";
 #elif defined(_WIN32)
     const char* platform = "Windows, 32-bit";
+#elif defined(__linux__)
+    const char* platform = sizeof(void*) == 8 ? "Linux, 64-bit" : "Linux, 32-bit";
 #else
     const char* platform = "POSIX";
 #endif
