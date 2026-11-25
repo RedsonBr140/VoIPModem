@@ -8,8 +8,10 @@ Studio build.
 **Status: VoIPModem builds and runs on Linux. Two of its lines, registered
 with Asterisk, called each other through the PBX (V.92, V.42 LAPM,
 V.44), and pppd, both directly and started by mgetty, ran PPP over that
-call, with pppd's local PAP, CHAP and MS-CHAPv2 authentication. Not yet
-tested with a physical modem or with FreeRADIUS.** Each item below says whether it is done, in progress
+call, with pppd's local PAP, CHAP and MS-CHAPv2 authentication.
+BinModem, a separate SIP softmodem, called a Linux line through Asterisk
+at V.90 56000/26400 and authenticated to pppd. Not yet tested with a
+physical modem or with FreeRADIUS.** Each item below says whether it is done, in progress
 or planned; "done" means it was built and run on Linux, not only
 written.
 
@@ -203,6 +205,20 @@ modems are libv90modem.
 | The same with a wrong client password (CHAP) | Refused: "Peer vmtest failed CHAP authentication", no address, connection terminated |
 | Passwords | SIP passwords not in the log, at `Level=Debug` with the SIP trace; the PPP secret not in VoIPModem's log either |
 
+### BinModem calling a Linux line
+
+BinModem (a SIP softmodem, run by the user on another machine) dialled
+line A's extension through Asterisk. On line A, pppd answered (chat:
+`RING` / `ATA`) with local authentication (`auth`, PAP and CHAP secrets
+for the test user).
+
+| Step | Result |
+|---|---|
+| Answer | `ATA`, codec PCMU |
+| Modem | **V.90 56000/26400** bit/s via V.8 (VoIPModem sends 56000), SNR 37.7 dB, round trip 3842 samples; **V.42 LAPM with V.44** |
+| PPP | BinModem's PPP client refused EAP and asked for CHAP-MD5; authenticated with CHAP; IPCP gave it 10.250.250.2 (VJ compression) |
+| Traffic | Ping from the Linux host to the caller over the link: 0% loss, RTT about 600 ms |
+
 At shutdown, each line logs `Unable to create/send REGISTER: Object is
 busy (PJSIP_EBUSY)` while it un-registers; it is the same harmless
 message as on Windows (`WINDOWS_RAS_DIALIN.md`, Known issues).
@@ -261,9 +277,9 @@ From a survey of `src/App` and `src/Lib` (the Manager stays Windows-only):
 
 ## Not tested
 
-- A far end other than VoIPModem itself: a physical modem through the
-  FXS gateway, a legacy client dialling in, a SIP softmodem such as
-  BinModem.
+- A physical modem through the FXS gateway, or a legacy client dialling
+  in. (BinModem, a SIP softmodem, has called in; see "Live results".)
+- A Linux line calling out to a modem other than VoIPModem.
 - FreeRADIUS (pppd's RADIUS plugin). Authentication through mgetty's
   AutoPPP (only pppd started directly was tried with authentication).
 - The systemd unit; running VoIPModem as a user other than the one that
