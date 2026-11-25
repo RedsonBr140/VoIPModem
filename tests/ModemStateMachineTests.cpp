@@ -369,6 +369,20 @@ TEST(FactoryDefaultsAndReset_RestoreNewSettings) {
     }
 }
 
+TEST(EscapeCharsThenAth_InCommandMode_HangsUpWithOk) {
+    // Unimodem's "+++" ... "ATH<cr>" after the call already ended: the
+    // first ATH must succeed, not return ERROR.
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.Execute(AtCommandParser::Parse("+++ATH"));
+    EXPECT_TRUE(outcome.finalResult == ResultCode::OK);
+    EXPECT_EQ(controller.hangUpCount, 1);
+    EXPECT_TRUE(core.CurrentState() == ModemState::CommandMode);
+}
+
 TEST(FClassTest_ReportsDataOnlySupport) {
     FakeCallController controller;
     Logger logger;

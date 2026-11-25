@@ -53,11 +53,29 @@ bool IsValidSettingValue(AtCommandType type, int value) {
     }
 }
 
+// Unimodem sends "+++", waits, then "ATH<cr>" to hang up even when the call
+// has already ended and the modem is back in command mode. There the '+'
+// bytes are ordinary command-line characters, so the line arrives as
+// "+++ATH". Skip a leading run of '+' when "AT" follows it, so that line
+// runs as "ATH". Anything else that starts with '+' is left alone (and is
+// still an ERROR for lacking the AT prefix).
+std::string StripLeadingEscapeChars(const std::string& s) {
+    const auto pos = s.find_first_not_of('+');
+    if (pos == 0 || pos == std::string::npos || s.size() - pos < 2) {
+        return s;
+    }
+    if (std::toupper(static_cast<unsigned char>(s[pos])) != 'A' ||
+        std::toupper(static_cast<unsigned char>(s[pos + 1])) != 'T') {
+        return s;
+    }
+    return s.substr(pos);
+}
+
 } // namespace
 
 AtParseResult AtCommandParser::Parse(const std::string& line) {
     AtParseResult result;
-    const std::string trimmed = Trim(line);
+    const std::string trimmed = StripLeadingEscapeChars(Trim(line));
 
     if (trimmed.empty()) {
         // A bare blank line is a no-op in command mode, not an error.

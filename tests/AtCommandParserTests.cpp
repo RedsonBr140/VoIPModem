@@ -387,3 +387,29 @@ TEST(UnimodemInitString2_ParsesInOrder) {
     EXPECT_TRUE(result.commands[5].type == AtCommandType::SetResultCodeSet);
     EXPECT_EQ(result.commands[5].numericParam.value_or(-1), 4);
 }
+
+// --- "+++" left in the command-mode line buffer -------------------------
+
+TEST(LeadingEscapeChars_BeforeAth_ParsesAsHangUp) {
+    // Unimodem sends "+++", waits, then "ATH<cr>" even after the call has
+    // already ended; in command mode that arrives as one line.
+    const auto result = AtCommandParser::Parse("+++ATH");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_EQ(result.commands.size(), static_cast<size_t>(1));
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::HangUp);
+}
+
+TEST(LeadingEscapeChars_Lowercase_ParsesAsHangUp) {
+    const auto result = AtCommandParser::Parse("+++ath0");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::HangUp);
+}
+
+TEST(EscapeCharsAlone_AreStillInvalid) {
+    EXPECT_TRUE(!AtCommandParser::Parse("+++").isValid);
+}
+
+TEST(EscapeCharsBeforeNonAtText_AreStillInvalid) {
+    EXPECT_TRUE(!AtCommandParser::Parse("+++HELLO").isValid);
+    EXPECT_TRUE(!AtCommandParser::Parse("+++A").isValid);
+}
