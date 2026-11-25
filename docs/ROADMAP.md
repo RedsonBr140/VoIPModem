@@ -202,6 +202,18 @@ traffic). The setup, step by step, is in `WINDOWS_RAS_DIALIN.md`.
   two lines, PSTN callers through a SIP trunk, com0com 2.2.2.0 with Secure
   Boot on.
 
+- **First RRAS session (Windows Server 2022)**: with the generic
+  "Standard 56000 bps Modem" driver, RRAS closed the line because
+  VoIPModem answered `ERROR` to `&C1`, `&D2`, `&K3`, `N1` and `X4` in the
+  driver's init strings. With those removed from the driver's registry
+  strings, RRAS answered, the modems trained at V.34 and a PPP session
+  completed. VoIPModem now accepts those commands (stored, not honored;
+  see `ARCHITECTURE.md`, "Windows Unimodem init strings"), so the stock
+  strings return `OK`; an RRAS call with the unmodified driver has not
+  been repeated since. Still open: DCD and DTR are not driven from call
+  state, so a hang-up takes about 20 s; and the phase's criterion (the
+  Windows 98 client dialling in and exchanging IP traffic) is not yet met.
+
 ## Phase 6 — Compatibility and optimization — started
 
 Includes: more modems (physical and soft), Windows XP and Server 2003

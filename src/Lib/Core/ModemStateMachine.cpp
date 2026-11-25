@@ -69,6 +69,28 @@ ExecutionOutcome ModemStateMachine::Execute(const AtParseResult& parsed) {
                 profile_.speakerMode = cmd.numericParam.value_or(0);
                 break;
 
+            // Stored only; see ModemProfile.h. The parser has already
+            // rejected out-of-range values.
+            case AtCommandType::SetDcdMode:
+                profile_.dcdMode = cmd.numericParam.value_or(0);
+                break;
+
+            case AtCommandType::SetDtrMode:
+                profile_.dtrMode = cmd.numericParam.value_or(0);
+                break;
+
+            case AtCommandType::SetFlowControl:
+                profile_.flowControl = cmd.numericParam.value_or(0);
+                break;
+
+            case AtCommandType::SetResultCodeSet:
+                profile_.resultCodeSet = cmd.numericParam.value_or(0);
+                break;
+
+            case AtCommandType::SetSpeedNegotiation:
+                profile_.speedNegotiation = cmd.numericParam.value_or(0);
+                break;
+
             case AtCommandType::SetRegister:
                 registers_.Set(cmd.registerIndex.value_or(0),
                                 static_cast<uint8_t>(cmd.numericParam.value_or(0)));

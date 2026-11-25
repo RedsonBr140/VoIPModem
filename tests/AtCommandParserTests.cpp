@@ -208,11 +208,208 @@ TEST(ExtendedCommand_NoNameAfterPrefix_IsInvalid) {
 }
 
 TEST(AmpersandUnknownLetter_IsInvalid) {
+    // &Z (store a phone number on Hayes modems) is still unsupported.
     const auto result = AtCommandParser::Parse("AT&Z");
     EXPECT_TRUE(!result.isValid);
 }
 
-TEST(UnknownLetterCommand_IsInvalid) {
-    const auto result = AtCommandParser::Parse("ATX1");
+TEST(BareAmpersand_IsInvalid) {
+    const auto result = AtCommandParser::Parse("AT&");
     EXPECT_TRUE(!result.isValid);
+}
+
+TEST(UnknownLetterCommand_IsInvalid) {
+    // Y (long-space disconnect on Hayes modems) is still unsupported.
+    // This used ATX1 until X became a recognised command.
+    const auto result = AtCommandParser::Parse("ATY1");
+    EXPECT_TRUE(!result.isValid);
+}
+
+// --- Commands sent by Windows' generic modem driver (Unimodem) ---------
+
+TEST(AmpersandC_WithDigit_IsSetDcdMode) {
+    const auto result = AtCommandParser::Parse("AT&C1");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_EQ(result.commands.size(), static_cast<size_t>(1));
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetDcdMode);
+    EXPECT_EQ(result.commands[0].numericParam.value_or(-1), 1);
+}
+
+TEST(AmpersandC_WithoutDigit_HasNoParam) {
+    const auto result = AtCommandParser::Parse("AT&C");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetDcdMode);
+    EXPECT_TRUE(!result.commands[0].numericParam.has_value());
+}
+
+TEST(AmpersandC_OutOfRange_IsInvalid) {
+    EXPECT_TRUE(AtCommandParser::Parse("AT&C0").isValid);
+    EXPECT_TRUE(!AtCommandParser::Parse("AT&C2").isValid);
+}
+
+TEST(AmpersandD_WithDigit_IsSetDtrMode) {
+    const auto result = AtCommandParser::Parse("AT&D2");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetDtrMode);
+    EXPECT_EQ(result.commands[0].numericParam.value_or(-1), 2);
+}
+
+TEST(AmpersandD_WithoutDigit_HasNoParam) {
+    const auto result = AtCommandParser::Parse("AT&D");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetDtrMode);
+    EXPECT_TRUE(!result.commands[0].numericParam.has_value());
+}
+
+TEST(AmpersandD_ZeroToThreeValid_FourIsInvalid) {
+    EXPECT_TRUE(AtCommandParser::Parse("AT&D0").isValid);
+    EXPECT_TRUE(AtCommandParser::Parse("AT&D1").isValid);
+    EXPECT_TRUE(AtCommandParser::Parse("AT&D3").isValid);
+    EXPECT_TRUE(!AtCommandParser::Parse("AT&D4").isValid);
+}
+
+TEST(AmpersandK_WithDigit_IsSetFlowControl) {
+    const auto result = AtCommandParser::Parse("AT&K3");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetFlowControl);
+    EXPECT_EQ(result.commands[0].numericParam.value_or(-1), 3);
+}
+
+TEST(AmpersandK_WithoutDigit_HasNoParam) {
+    const auto result = AtCommandParser::Parse("AT&K");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetFlowControl);
+    EXPECT_TRUE(!result.commands[0].numericParam.has_value());
+}
+
+TEST(AmpersandK_OnlyZeroAndThreeToSixAreValid) {
+    EXPECT_TRUE(AtCommandParser::Parse("AT&K0").isValid);
+    EXPECT_TRUE(!AtCommandParser::Parse("AT&K1").isValid);
+    EXPECT_TRUE(!AtCommandParser::Parse("AT&K2").isValid);
+    EXPECT_TRUE(AtCommandParser::Parse("AT&K4").isValid);
+    EXPECT_TRUE(AtCommandParser::Parse("AT&K5").isValid);
+    EXPECT_TRUE(AtCommandParser::Parse("AT&K6").isValid);
+    EXPECT_TRUE(!AtCommandParser::Parse("AT&K7").isValid);
+}
+
+TEST(AtX_WithDigit_IsSetResultCodeSet) {
+    const auto result = AtCommandParser::Parse("ATX4");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetResultCodeSet);
+    EXPECT_EQ(result.commands[0].numericParam.value_or(-1), 4);
+}
+
+TEST(AtX_WithoutDigit_HasNoParam) {
+    const auto result = AtCommandParser::Parse("ATX");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetResultCodeSet);
+    EXPECT_TRUE(!result.commands[0].numericParam.has_value());
+}
+
+TEST(AtX_OutOfRange_IsInvalid) {
+    EXPECT_TRUE(AtCommandParser::Parse("ATX0").isValid);
+    EXPECT_TRUE(!AtCommandParser::Parse("ATX5").isValid);
+}
+
+TEST(AtN_WithDigit_IsSetSpeedNegotiation) {
+    const auto result = AtCommandParser::Parse("ATN1");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetSpeedNegotiation);
+    EXPECT_EQ(result.commands[0].numericParam.value_or(-1), 1);
+}
+
+TEST(AtN_WithoutDigit_HasNoParam) {
+    const auto result = AtCommandParser::Parse("ATN");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetSpeedNegotiation);
+    EXPECT_TRUE(!result.commands[0].numericParam.has_value());
+}
+
+TEST(AtN_OutOfRange_IsInvalid) {
+    EXPECT_TRUE(AtCommandParser::Parse("ATN0").isValid);
+    EXPECT_TRUE(!AtCommandParser::Parse("ATN2").isValid);
+}
+
+TEST(NewSettingCommands_LowercaseAndChained_AreAccepted) {
+    const auto result = AtCommandParser::Parse("at&c1&d2&k3n1x4");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_EQ(result.commands.size(), static_cast<size_t>(5));
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetDcdMode);
+    EXPECT_TRUE(result.commands[1].type == AtCommandType::SetDtrMode);
+    EXPECT_TRUE(result.commands[2].type == AtCommandType::SetFlowControl);
+    EXPECT_TRUE(result.commands[3].type == AtCommandType::SetSpeedNegotiation);
+    EXPECT_TRUE(result.commands[4].type == AtCommandType::SetResultCodeSet);
+}
+
+TEST(NewSettingCommands_WithoutDigits_Chain) {
+    const auto result = AtCommandParser::Parse("AT&C&D&KNXE0");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_EQ(result.commands.size(), static_cast<size_t>(6));
+    EXPECT_TRUE(result.commands[4].type == AtCommandType::SetResultCodeSet);
+    EXPECT_TRUE(result.commands[5].type == AtCommandType::SetEcho);
+}
+
+TEST(OutOfRangeInChain_InvalidatesWholeLine) {
+    EXPECT_TRUE(!AtCommandParser::Parse("ATE0&C1&D9V1").isValid);
+}
+
+TEST(UnimodemInitString1_ParsesInOrder) {
+    // mdmgen.inf, "Standard 56000 bps Modem" (Gen556F), Windows Server 2022.
+    const auto result = AtCommandParser::Parse("AT&FE0V1&C1&D2S95=47S0=0");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_EQ(result.commands.size(), static_cast<size_t>(7));
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::FactoryDefaults);
+    EXPECT_TRUE(result.commands[1].type == AtCommandType::SetEcho);
+    EXPECT_TRUE(result.commands[2].type == AtCommandType::SetVerbose);
+    EXPECT_TRUE(result.commands[3].type == AtCommandType::SetDcdMode);
+    EXPECT_EQ(result.commands[3].numericParam.value_or(-1), 1);
+    EXPECT_TRUE(result.commands[4].type == AtCommandType::SetDtrMode);
+    EXPECT_EQ(result.commands[4].numericParam.value_or(-1), 2);
+    EXPECT_TRUE(result.commands[5].type == AtCommandType::SetRegister);
+    EXPECT_EQ(result.commands[5].registerIndex.value_or(-1), 95);
+    EXPECT_TRUE(result.commands[6].type == AtCommandType::SetRegister);
+    EXPECT_EQ(result.commands[6].registerIndex.value_or(-1), 0);
+}
+
+TEST(UnimodemInitString2_ParsesInOrder) {
+    const auto result = AtCommandParser::Parse("ATS7=60L0M1&K3N1X4");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_EQ(result.commands.size(), static_cast<size_t>(6));
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::SetRegister);
+    EXPECT_EQ(result.commands[0].registerIndex.value_or(-1), 7);
+    EXPECT_EQ(result.commands[0].numericParam.value_or(-1), 60);
+    EXPECT_TRUE(result.commands[1].type == AtCommandType::SetSpeakerVolume);
+    EXPECT_TRUE(result.commands[2].type == AtCommandType::SetSpeakerMode);
+    EXPECT_TRUE(result.commands[3].type == AtCommandType::SetFlowControl);
+    EXPECT_EQ(result.commands[3].numericParam.value_or(-1), 3);
+    EXPECT_TRUE(result.commands[4].type == AtCommandType::SetSpeedNegotiation);
+    EXPECT_EQ(result.commands[4].numericParam.value_or(-1), 1);
+    EXPECT_TRUE(result.commands[5].type == AtCommandType::SetResultCodeSet);
+    EXPECT_EQ(result.commands[5].numericParam.value_or(-1), 4);
+}
+
+// --- "+++" left in the command-mode line buffer -------------------------
+
+TEST(LeadingEscapeChars_BeforeAth_ParsesAsHangUp) {
+    // Unimodem sends "+++", waits, then "ATH<cr>" even after the call has
+    // already ended; in command mode that arrives as one line.
+    const auto result = AtCommandParser::Parse("+++ATH");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_EQ(result.commands.size(), static_cast<size_t>(1));
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::HangUp);
+}
+
+TEST(LeadingEscapeChars_Lowercase_ParsesAsHangUp) {
+    const auto result = AtCommandParser::Parse("+++ath0");
+    EXPECT_TRUE(result.isValid);
+    EXPECT_TRUE(result.commands[0].type == AtCommandType::HangUp);
+}
+
+TEST(EscapeCharsAlone_AreStillInvalid) {
+    EXPECT_TRUE(!AtCommandParser::Parse("+++").isValid);
+}
+
+TEST(EscapeCharsBeforeNonAtText_AreStillInvalid) {
+    EXPECT_TRUE(!AtCommandParser::Parse("+++HELLO").isValid);
+    EXPECT_TRUE(!AtCommandParser::Parse("+++A").isValid);
 }

@@ -40,11 +40,42 @@ bool TryParseDigits(const std::string& body, size_t& i, int& outValue) {
     return true;
 }
 
+// Value ranges for the commands Windows' generic modem driver sends in its
+// init strings. A missing digit means 0, as for every other Hayes command.
+bool IsValidSettingValue(AtCommandType type, int value) {
+    switch (type) {
+        case AtCommandType::SetDcdMode:          return value >= 0 && value <= 1;
+        case AtCommandType::SetDtrMode:          return value >= 0 && value <= 3;
+        case AtCommandType::SetFlowControl:      return value == 0 || (value >= 3 && value <= 6);
+        case AtCommandType::SetResultCodeSet:    return value >= 0 && value <= 4;
+        case AtCommandType::SetSpeedNegotiation: return value >= 0 && value <= 1;
+        default:                                 return true; // other commands are not range-checked here
+    }
+}
+
+// Unimodem sends "+++", waits, then "ATH<cr>" to hang up even when the call
+// has already ended and the modem is back in command mode. There the '+'
+// bytes are ordinary command-line characters, so the line arrives as
+// "+++ATH". Skip a leading run of '+' when "AT" follows it, so that line
+// runs as "ATH". Anything else that starts with '+' is left alone (and is
+// still an ERROR for lacking the AT prefix).
+std::string StripLeadingEscapeChars(const std::string& s) {
+    const auto pos = s.find_first_not_of('+');
+    if (pos == 0 || pos == std::string::npos || s.size() - pos < 2) {
+        return s;
+    }
+    if (std::toupper(static_cast<unsigned char>(s[pos])) != 'A' ||
+        std::toupper(static_cast<unsigned char>(s[pos + 1])) != 'T') {
+        return s;
+    }
+    return s.substr(pos);
+}
+
 } // namespace
 
 AtParseResult AtCommandParser::Parse(const std::string& line) {
     AtParseResult result;
-    const std::string trimmed = Trim(line);
+    const std::string trimmed = StripLeadingEscapeChars(Trim(line));
 
     if (trimmed.empty()) {
         // A bare blank line is a no-op in command mode, not an error.
@@ -178,16 +209,30 @@ AtParseResult AtCommandParser::Parse(const std::string& line) {
 
         if (c == '&') {
             ++i;
-            if (i >= body.size() || std::toupper(static_cast<unsigned char>(body[i])) != 'F') {
-                result.isValid = false; // only &F is supported in Phase 1
+            if (i >= body.size()) {
+                result.isValid = false; // bare "&"
                 return result;
+            }
+            AtCommandType ampType;
+            switch (std::toupper(static_cast<unsigned char>(body[i]))) {
+                case 'F': ampType = AtCommandType::FactoryDefaults; break;
+                case 'C': ampType = AtCommandType::SetDcdMode; break;
+                case 'D': ampType = AtCommandType::SetDtrMode; break;
+                case 'K': ampType = AtCommandType::SetFlowControl; break;
+                default:
+                    result.isValid = false; // any other &<letter> is unsupported
+                    return result;
             }
             ++i;
             AtCommand cmd;
-            cmd.type = AtCommandType::FactoryDefaults;
+            cmd.type = ampType;
             int value = 0;
             if (TryParseDigits(body, i, value)) {
                 cmd.numericParam = value;
+            }
+            if (!IsValidSettingValue(ampType, cmd.numericParam.value_or(0))) {
+                result.isValid = false;
+                return result;
             }
             result.commands.push_back(cmd);
             continue;
@@ -203,6 +248,8 @@ AtParseResult AtCommandParser::Parse(const std::string& line) {
             case 'M': type = AtCommandType::SetSpeakerMode; break;
             case 'I': type = AtCommandType::Identify; break;
             case 'H': type = AtCommandType::HangUp; break;
+            case 'X': type = AtCommandType::SetResultCodeSet; break;
+            case 'N': type = AtCommandType::SetSpeedNegotiation; break;
             default:
                 result.isValid = false;
                 return result;
@@ -214,6 +261,10 @@ AtParseResult AtCommandParser::Parse(const std::string& line) {
         int value = 0;
         if (TryParseDigits(body, i, value)) {
             cmd.numericParam = value;
+        }
+        if (!IsValidSettingValue(type, cmd.numericParam.value_or(0))) {
+            result.isValid = false;
+            return result;
         }
         result.commands.push_back(cmd);
     }
