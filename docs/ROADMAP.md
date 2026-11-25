@@ -10,7 +10,7 @@ just coded. `ARCHITECTURE.md` describes how each part works.
 | 2. SIP call control | **Complete**, verified against Asterisk |
 | 3. RTP audio | **Complete**, verified live; media path retuned for modems in Phase 4 |
 | 4. Modem interoperability | **In progress**: real data links at up to V.90 with a SIP softmodem; physical analog modem not yet tested |
-| 5. Windows networking (RAS/PPP) | Not started |
+| 5. Windows networking (RAS/PPP) | **Started**: RRAS on Server 2022 answered and completed a PPP session; legacy client not yet tested |
 | 6. Compatibility and optimization | **Started**: x64 + Win32 builds; XP Win32 build runs on 32-bit XP (V.34 call live); XP x64 / Server 2003 not yet built; Windows service + control API + VoIPModem Manager built |
 
 ## Phase 1 — Serial modem skeleton — complete
@@ -138,13 +138,25 @@ Problems these calls found, each fixed before the next:
 - **Call-audio recording** (both directions, our side) for diagnosis and
   for replay through `v90m-replay`.
 
-## Phase 5 — Windows networking (RAS/PPP) — not started
+## Phase 5 — Windows networking (RAS/PPP) — started
 
 VoIPModem is a modem bank: Windows Server's own RAS terminates PPP
 through the modem driver on the com0com port. No PPP code goes into
 VoIPModem. The work is configuring RAS on those modem ports and proving a
 full dial-up session (the legacy client dialling in and exchanging IP
 traffic).
+
+- **First RRAS session (Windows Server 2022)**: with the generic
+  "Standard 56000 bps Modem" driver, RRAS closed the line because
+  VoIPModem answered `ERROR` to `&C1`, `&D2`, `&K3`, `N1` and `X4` in the
+  driver's init strings. With those removed from the driver's registry
+  strings, RRAS answered, the modems trained at V.34 and a PPP session
+  completed. VoIPModem now accepts those commands (stored, not honored;
+  see `ARCHITECTURE.md`, "Windows Unimodem init strings"), so the stock
+  strings return `OK`; an RRAS call with the unmodified driver has not
+  been repeated since. Still open: DCD and DTR are not driven from call
+  state, so a hang-up takes about 20 s; and the phase's criterion (the
+  Windows 98 client dialling in and exchanging IP traffic) is not yet met.
 
 ## Phase 6 — Compatibility and optimization — started
 

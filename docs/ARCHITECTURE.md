@@ -136,9 +136,12 @@ Received bytes from `PollReceivedData()` are written to the port.
 
 - **Parser** (`AtCommandParser`): `AT`, `ATI`, `ATZ`, `ATE`, `ATV`, `ATQ`,
   `ATS<n>=<v>`, `ATS<n>?`, `ATD`/`ATDT`/`ATDP` (the T/P modifier is
-  stripped before dialling), `ATA`, `ATH`, `AT&F`, chained commands
-  (`ATE1V0Q0`), and V.25ter extended commands `+NAME`/`#NAME` with
-  `=?`, `?` and `=<value>`. Anything else is `ERROR`.
+  stripped before dialling), `ATA`, `ATH`, `AT&F`, `ATL`, `ATM`, `AT&C`,
+  `AT&D`, `AT&K`, `ATX`, `ATN`, chained commands (`ATE1V0Q0`), and
+  V.25ter extended commands `+NAME`/`#NAME` with `=?`, `?` and
+  `=<value>`. A leading run of `+` before `AT` is skipped (see below).
+  Anything else, including an out-of-range value for one of the
+  commands listed under "Windows Unimodem init strings", is `ERROR`.
 - **Extended commands answered**: `+FCLASS` (data only: `0`), `+GMI`,
   `+GMM`, `+GMR`. `+GCI` and `#CLS` return `ERROR`; neither is modelled.
   This is enough for Windows' "Standard Modem Types" driver and its
@@ -152,6 +155,34 @@ Received bytes from `PollReceivedData()` are written to the port.
   `CONNECT` carries the rate the modem receives at in verbose mode
   (`CONNECT 26400`); numeric mode sends `1`. Responses are framed
   `\r\n<text>\r\n` in both modes.
+
+### Windows Unimodem init strings
+
+Windows' generic modem driver (`mdmgen.inf`, "Standard 56000 bps Modem")
+sends `AT&FE0V1&C1&D2S95=47S0=0` and `ATS7=60L0M1&K3N1X4` when RAS opens
+the line, and closes the line if either returns `ERROR`. Both now return
+`OK`. These commands are **accepted and stored, not honored**: the value
+goes into `ModemProfile` (reset by `AT&F` and `ATZ`) and changes nothing
+about how the modem behaves.
+
+| Command | Accepted | Factory | What honoring it would mean (not done) |
+|---|---|---|---|
+| `AT&Cn` | 0-1 | 1 | Drive DCD: always on, or only while the modem link is up |
+| `AT&Dn` | 0-3 | 2 | Act on DTR drop: ignore, command mode, hang up, hang up and reset |
+| `AT&Kn` | 0, 3-6 | 3 | Flow control: none, RTS/CTS, XON/XOFF, transparent XON/XOFF, both |
+| `ATXn` | 0-4 | 4 | Choose the result-code set; today the full set is always used |
+| `ATNn` | 0-1 | 1 | Fixed rate (S37) or negotiate; today `Modulations=` alone decides |
+| `ATLn`, `ATMn` | any digit | 2, 1 | Physical speaker volume and mode (no such speaker) |
+
+`S7=60` (carrier wait time) is stored and not acted on. `S95=47`
+(Rockwell's extended result-code register) returns `OK` but is discarded,
+as is any write above `S9`; reading it back gives `000`.
+
+When a call has already ended, Unimodem still sends `+++`, waits, and
+sends `ATH<cr>`. In command mode the `+` bytes are ordinary line
+characters, so the line reads `+++ATH`. The parser skips a leading run of
+`+` when `AT` follows it, so that line runs as `ATH`. A line of only `+`,
+or `+` followed by anything but `AT`, is still `ERROR`.
 
 ## SIP (PjsipEndpoint, PjsipCallController)
 
