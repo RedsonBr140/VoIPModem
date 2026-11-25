@@ -44,6 +44,18 @@ Windows Server 2003 is an important deployment target for the virtual modem endp
 
 Keep operating-system-specific code isolated so that future compatibility work does not require rewriting the modem protocol implementation.
 
+### Linux
+
+Linux is a supported host platform for the modem bank, added after release 0.0.2. Windows stays the primary platform; Linux must not change Windows behaviour or replace the Visual Studio build.
+
+- The modem bank (SIP/RTP, Hayes commands, modem DSP) runs on Linux and behaves as it does on Windows.
+- Serial side: VoIPModem creates a pseudo-terminal (PTY) per line instead of using com0com. A PTY has no modem control lines, so DCD and DTR are emulated; the limits are documented.
+- PPP stays outside VoIPModem, as on Windows: the operator runs pppd (or similar) on the PTY, with authentication such as FreeRADIUS. VoIPModem only documents compatible setups.
+- Build: CMake on Linux, alongside the unchanged Visual Studio solution. PJSIP and libv90modem are built from the repository's submodules.
+- The VoIPModem Manager stays a Windows program; it manages a Linux host through the control API.
+
+Plan, status and limits: `docs/LINUX.md`.
+
 ### Virtual serial ports
 
 The initial prototype uses com0com to create a paired virtual serial connection, currently configured as COM3 and COM4. One side is exposed to the application or test harness, and the other can be opened by a terminal or dial-up networking client.

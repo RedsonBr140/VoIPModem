@@ -13,6 +13,8 @@ just coded. `ARCHITECTURE.md` describes how each part works.
 | 5. Windows networking (RAS/PPP) | **Started**: RRAS on Server 2022 answered a physical modem; PPP session, internet through NAT, with workarounds; legacy client not yet tested |
 | 6. Compatibility and optimization | **Started**: x64 + Win32 builds; XP Win32 build runs on 32-bit XP (V.34 call live); XP x64 / Server 2003 not yet built; Windows service + control API + VoIPModem Manager built |
 
+Linux host support is tracked separately, in `LINUX.md`.
+
 ## Phase 1 — Serial modem skeleton — complete
 
 *Criterion: the application behaves like a basic Hayes-compatible modem
