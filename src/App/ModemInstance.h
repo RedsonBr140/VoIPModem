@@ -15,6 +15,7 @@
 #include "../Lib/Config/AppConfig.h"
 #include "../Lib/Control/LineStatus.h"
 #include "../Lib/Control/ServiceStats.h"
+#include "../Lib/Core/DtrDebouncer.h"
 #include "../Lib/Core/ICallController.h"
 #include "../Lib/Core/ModemStateMachine.h"
 #include "../Lib/Logging/Logger.h"
@@ -103,6 +104,14 @@ private:
     void PumpIncomingCallRinging();
     void PumpDialAudioTrigger();
     void ProcessCommands();
+
+    // Serial control signals (docs/ARCHITECTURE.md "Serial control
+    // signals"). PumpControlSignals() polls the DTE's DTR (our DSR) once
+    // per RunLoop iteration and hands debounced changes to the core;
+    // UpdateCarrierOutput() sets our DTR (the DTE's DCD) to
+    // ModemStateMachine::CarrierAsserted() if it differs.
+    void PumpControlSignals();
+    void UpdateCarrierOutput();
     void RefreshStatus();
     void RequestRegistration(bool registered);
     void TryRegistration();
@@ -202,6 +211,12 @@ private:
     std::chrono::steady_clock::time_point lastOnlineDataByteAt_{};
     std::chrono::steady_clock::time_point thirdPlusAt_{};
     static constexpr std::chrono::milliseconds kEscapeGuardTime{1000};
+
+    // DTE's DTR, debounced: a drop must last this long to count, so a
+    // glitch as com0com's far side opens or closes does not hang up.
+    static constexpr std::chrono::milliseconds kDtrDropDebounce{50};
+    DtrDebouncer dtrIn_{kDtrDropDebounce};
+    std::optional<bool> dtrOut_; // our DTR as last set; empty = not set since Open()
 
     // Operator commands (Post), drained by the line's thread.
     std::mutex commandMutex_;
