@@ -24,6 +24,13 @@ public:
     bool Write(const std::string& data) override;
     bool Write(const std::vector<uint8_t>& data) override;
 
+    // EscapeCommFunction(SETDTR/CLRDTR) and GetCommModemStatus(MS_DSR_ON);
+    // both exist on every Windows target, XP and Server 2003 included. The
+    // port is opened with DTR_CONTROL_DISABLE so that only SetDtr() moves
+    // the line: it starts low.
+    bool SetDtr(bool asserted) override;
+    bool ReadDsr(bool& asserted) override;
+
 private:
     TaggedLogger& logger_;
     HANDLE handle_ = INVALID_HANDLE_VALUE;

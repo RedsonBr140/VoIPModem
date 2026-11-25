@@ -93,6 +93,13 @@ bool ModemInstance::Open() {
         RefreshStatus();
         return false;
     }
+    dtrOut_.reset();
+    UpdateCarrierOutput();
+    bool dteDtr = true; // if DSR cannot be read, behave as before: DTE present
+    serialPort_.ReadDsr(dteDtr);
+    dtrIn_.Reset(dteDtr);
+    core_.SetDteReady(dteDtr);
+    logger_.Debug(std::string("DTE DTR (our DSR) is ") + (dteDtr ? "on" : "off") + " at open");
     if (sip_ != nullptr && !sipStarted_) {
         sipStarted_ = sip_->Start();
         if (!sipStarted_) {
@@ -161,6 +168,7 @@ void ModemInstance::RunLoop() {
         // detects an actually closed/failed port.
 
         ProcessCommands();
+        PumpControlSignals();
         PumpEscapeSequenceTimeout();
         PumpOnlineDataRx();
         PollCallEvents();
@@ -526,8 +534,49 @@ void ModemInstance::PollCallEvents() {
             return;
         }
         ObserveEvent(event);
-        session_.SendUnsolicited(core_.HandleCallEvent(event));
+        const ExecutionOutcome outcome = core_.HandleCallEvent(event);
+        // DCD goes up before CONNECT and down before NO CARRIER, as on a
+        // real modem: a DTE may check DCD as soon as it reads the result.
+        UpdateCarrierOutput();
+        session_.SendUnsolicited(outcome);
         ObserveState();
+    }
+}
+
+void ModemInstance::PumpControlSignals() {
+    bool dsr = false;
+    if (serialPort_.ReadDsr(dsr)) {
+        switch (dtrIn_.Update(dsr, std::chrono::steady_clock::now())) {
+            case DtrDebouncer::Change::Raised:
+                logger_.Debug("DTE raised DTR (our DSR on)");
+                core_.HandlePeerDtrChange(true);
+                break;
+            case DtrDebouncer::Change::Dropped: {
+                logger_.Debug("DTE dropped DTR (our DSR off)");
+                const DtrOutcome outcome = core_.HandlePeerDtrChange(false);
+                UpdateCarrierOutput();
+                session_.SendUnsolicited(outcome.response);
+                ObserveState();
+                break;
+            }
+            case DtrDebouncer::Change::None:
+                break;
+        }
+    }
+    UpdateCarrierOutput(); // picks up ATH, AT&C, ATZ and the like
+}
+
+void ModemInstance::UpdateCarrierOutput() {
+    const bool want = core_.CarrierAsserted();
+    if (dtrOut_.has_value() && *dtrOut_ == want) {
+        return;
+    }
+    // Recorded even if the set fails, so a refusing driver is reported
+    // once (WindowsSerialPort logs it) rather than every iteration.
+    dtrOut_ = want;
+    if (serialPort_.SetDtr(want)) {
+        logger_.Debug(std::string("Carrier ") + (want ? "on" : "off") + ": our DTR (the DTE's DCD) " +
+                      (want ? "raised" : "lowered"));
     }
 }
 
@@ -547,7 +596,12 @@ void ModemInstance::PumpIncomingCallRinging() {
     ++ringCount_;
 
     const int autoAnswerAfter = core_.Registers().Get(0); // S0
-    if (autoAnswerAfter > 0 && ringCount_ >= autoAnswerAfter) {
+    if (autoAnswerAfter > 0 && ringCount_ >= autoAnswerAfter && !core_.AutoAnswerAllowed()) {
+        if (ringCount_ == autoAnswerAfter) {
+            logger_.Debug("Not auto-answering: the DTE's DTR is off (AT&D" +
+                          std::to_string(core_.Profile().dtrMode) + ")");
+        }
+    } else if (autoAnswerAfter > 0 && ringCount_ >= autoAnswerAfter) {
         logger_.Info("Auto-answering after " + std::to_string(ringCount_) + " ring(s) (S0=" +
                      std::to_string(autoAnswerAfter) + ")");
         session_.TriggerAutoAnswer();

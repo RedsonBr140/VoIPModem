@@ -46,8 +46,11 @@ bool WindowsSerialPort::Open(const std::string& portName, int baudRate) {
     dcb.fParity = FALSE;
     dcb.fOutxCtsFlow = FALSE;
     dcb.fOutxDsrFlow = FALSE;
-    dcb.fDtrControl = DTR_CONTROL_ENABLE;
+    // DTR is ours to drive (SetDtr): through com0com it is the other
+    // side's DCD. It starts low; ModemInstance raises it as &C requires.
+    dcb.fDtrControl = DTR_CONTROL_DISABLE;
     dcb.fRtsControl = RTS_CONTROL_ENABLE;
+    dcb.fDsrSensitivity = FALSE;
 
     if (!SetCommState(handle_, &dcb)) {
         logger_.Error("SetCommState failed for " + portName);
@@ -110,6 +113,30 @@ bool WindowsSerialPort::Write(const std::vector<uint8_t>& data) {
         return false;
     }
     return bytesWritten == data.size();
+}
+
+bool WindowsSerialPort::SetDtr(bool asserted) {
+    if (!IsOpen()) {
+        return false;
+    }
+    if (!EscapeCommFunction(handle_, asserted ? SETDTR : CLRDTR)) {
+        logger_.Error("EscapeCommFunction(" + std::string(asserted ? "SETDTR" : "CLRDTR") +
+                      ") failed (GetLastError=" + std::to_string(GetLastError()) + ")");
+        return false;
+    }
+    return true;
+}
+
+bool WindowsSerialPort::ReadDsr(bool& asserted) {
+    if (!IsOpen()) {
+        return false;
+    }
+    DWORD status = 0;
+    if (!GetCommModemStatus(handle_, &status)) {
+        return false;
+    }
+    asserted = (status & MS_DSR_ON) != 0;
+    return true;
 }
 
 } // namespace voipmodem

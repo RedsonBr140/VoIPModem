@@ -90,6 +90,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Audio\WindowsAudioOutput.h" />
+    <ClInclude Include="Core\DtrDebouncer.h" />
     <ClInclude Include="Core\ICallController.h" />
     <ClInclude Include="Core\ModemProfile.h" />
     <ClInclude Include="Core\ModemState.h" />

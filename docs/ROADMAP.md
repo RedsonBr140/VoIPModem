@@ -207,12 +207,17 @@ traffic). The setup, step by step, is in `WINDOWS_RAS_DIALIN.md`.
   VoIPModem answered `ERROR` to `&C1`, `&D2`, `&K3`, `N1` and `X4` in the
   driver's init strings. With those removed from the driver's registry
   strings, RRAS answered, the modems trained at V.34 and a PPP session
-  completed. VoIPModem now accepts those commands (stored, not honored;
-  see `ARCHITECTURE.md`, "Windows Unimodem init strings"), so the stock
-  strings return `OK`; an RRAS call with the unmodified driver has not
-  been repeated since. Still open: DCD and DTR are not driven from call
-  state, so a hang-up takes about 20 s; and the phase's criterion (the
-  Windows 98 client dialling in and exchanging IP traffic) is not yet met.
+  completed. VoIPModem now accepts those commands (see `ARCHITECTURE.md`,
+  "Windows Unimodem init strings"), so the stock strings return `OK`; an
+  RRAS call with the unmodified driver has not been repeated since.
+- **DCD and DTR**: that session's modem log showed "CD is high while
+  initializing modem", and each hang-up took about 20 s (DTR lowered, CD
+  never dropped, then `+++` and `ATH`). `&C` and `&D` are now honored: DCD
+  is on only while the data link is up (`&C1`) and a DTR drop hangs up
+  (`&D2`); see `ARCHITECTURE.md`, "Serial control signals". Covered by
+  unit tests; not yet confirmed against RRAS on a live system.
+- Still open: the phase's criterion (the Windows 98 client dialling in
+  and exchanging IP traffic) is not yet met.
 
 ## Phase 6 — Compatibility and optimization — started
 
