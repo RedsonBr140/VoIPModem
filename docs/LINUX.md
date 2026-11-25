@@ -5,12 +5,13 @@ host platform after release 0.0.2 (see `PROJECT_SPEC.md` section 3,
 "Linux"). Windows remains the primary platform and keeps its Visual
 Studio build.
 
-**Status: VoIPModem builds and runs on Linux. Two of its lines called each
-other through its own SIP endpoint (V.92), and pppd, both directly and
-started by mgetty, ran PPP over that call. Not yet tested through
-Asterisk, with a physical modem, or with authentication.** Each item
-below says whether it is done, in progress or planned; "done" means it
-was built and run on Linux, not only written.
+**Status: VoIPModem builds and runs on Linux. Two of its lines, registered
+with Asterisk, called each other through the PBX (V.92, V.42 LAPM,
+V.44), and pppd, both directly and started by mgetty, ran PPP over that
+call. Not yet tested with a physical modem or with PPP
+authentication.** Each item below says whether it is done, in progress
+or planned; "done" means it was built and run on Linux, not only
+written.
 
 ## Building
 
@@ -182,10 +183,31 @@ sends PPP frames:
 
 ## Live results (2026-11-25)
 
-On the test host, without Asterisk: one VoIPModem process with two lines,
-line A calling line B (`ATDT200`) through VoIPModem's own SIP endpoint
-(`[SIP] Server=127.0.0.1:<LocalPort>`, `RegisterOnStart=0`). Both modems
-are libv90modem.
+### Through Asterisk
+
+One VoIPModem process on the test host with two lines, each registered
+with the Asterisk server used for the Windows tests (PJSIP extensions,
+G.711 u-law). Line A dialled line B's extension through Asterisk. Both
+modems are libv90modem.
+
+| Test | Result |
+|---|---|
+| Registration | Both lines 200 OK within 2 s of start |
+| A calls B, B answered with `ATA` | `RING`, codec PCMU, then **V.92** 53333/41333 bit/s, **V.42 LAPM with V.44**; data intact in both directions; `+++`, `ATH`; B gets `NO CARRIER` |
+| pppd client (A, in its own network namespace) to pppd server (B) | IPCP up in 20 s; ping over the modem link, 0% loss, RTT about 600 ms |
+| The client pppd killed (no LCP terminate) | A hangs up (`&D2`); B's carrier drop hangs up the server pppd ("Modem hangup") |
+| mgetty on B (AutoPPP) instead of the pppd server | mgetty answers; its pppd brings IPCP up in 23 s; ping 0% loss; hung up with SIGHUP ("Modem hangup") when the client is killed |
+| Passwords | Not in the log, at `Level=Debug` with the SIP trace |
+
+At shutdown, each line logs `Unable to create/send REGISTER: Object is
+busy (PJSIP_EBUSY)` while it un-registers; it is the same harmless
+message as on Windows (`WINDOWS_RAS_DIALIN.md`, Known issues).
+
+### Without Asterisk
+
+The first runs, before Asterisk extensions were available: line A calling
+line B (`ATDT200`) through VoIPModem's own SIP endpoint
+(`[SIP] Server=127.0.0.1:<LocalPort>`, `RegisterOnStart=0`).
 
 | Test | Result |
 |---|---|
@@ -207,8 +229,8 @@ way by default) and the modems' own delay.
 | 1 | CMake build of libv90modem, PJSIP and the VoIPModem library; the unit tests pass on Linux; an Ubuntu CI job | **Done** 2026-11-25: 160 tests pass on Debian 13 (Release and Debug) |
 | 2 | `PtySerialPort` (`ISerialPort` on a PTY) with the emulation above, and unit tests that open the slave side | **Done** 2026-11-25: 10 PTY tests (170 in all) pass on Debian 13, 30 runs without a failure |
 | 3 | Linux entry point: foreground process, SIGTERM/SIGINT, systemd unit; Linux versions of the platform-specific parts of `Application` | **Done** 2026-11-25, except that the systemd unit has not been tried |
-| 4 | Live test: AT commands through a terminal program on the symlink, SIP registration with Asterisk, a modem call to `CONNECT` | **Partly done**: AT commands and modem calls to `CONNECT` between two lines, without Asterisk. Registration and calls through Asterisk not yet tested |
-| 5 | A dial-in setup with pppd on the PTY (authentication such as FreeRADIUS), documented | **Partly done**: pppd and mgetty + AutoPPP verified without authentication. Authentication and FreeRADIUS not yet tested |
+| 4 | Live test: AT commands through a terminal program on the symlink, SIP registration with Asterisk, a modem call to `CONNECT` | **Done** 2026-11-25: AT commands; registration; V.92 calls between two lines through Asterisk |
+| 5 | A dial-in setup with pppd on the PTY (authentication such as FreeRADIUS), documented | **Partly done**: pppd and mgetty + AutoPPP verified through Asterisk, without authentication. Authentication and FreeRADIUS not yet tested |
 | 6 | Release packaging for Linux | Planned |
 
 ## Windows-specific code to port
@@ -231,11 +253,13 @@ From a survey of `src/App` and `src/Lib` (the Manager stays Windows-only):
 
 - Debian 13 (trixie), x86_64, kernel 6.12, gcc 14.2, CMake 3.31.
 - ppp 2.5.2 and mgetty 1.2.1 from Debian.
+- The Asterisk server used for the Windows tests, on the same LAN.
 
 ## Not tested
 
-- Registration and calls through Asterisk; any call that leaves the host.
-- A physical modem or a legacy client dialling in.
+- A far end other than VoIPModem itself: a physical modem through the
+  FXS gateway, a legacy client dialling in, a SIP softmodem such as
+  BinModem.
 - PPP authentication (PAP/CHAP), FreeRADIUS.
 - The systemd unit; running VoIPModem as a user other than the one that
   opened the ports in the tests.
