@@ -39,6 +39,7 @@ Docs:
 - `docs/PROJECT_SPEC.md`: requirements and goals.
 - `docs/ARCHITECTURE.md`: how it works.
 - `docs/CONTROL_API.md`: the control API, for the Manager or your own scripts.
+- `docs/WINDOWS_RAS_DIALIN.md`: Windows RRAS answering dial-up calls on VoIPModem's lines.
 - `docs/ROADMAP.md`: phase status and test results.
 - `docs/design/`: the Manager's design mock-up.
 
@@ -49,8 +50,14 @@ and RTP audio are complete and verified against Asterisk. Real modem data
 links work: answering, VoIPModem connected at **V.90 56000/26400** with
 V.42 LAPM and V.44 compression; calling, at **V.34 31200/14400** and V.21.
 Those tests used a SIP software modem (BinModem) as the far end. A
-physical analog modem through the FXS gateway has not been tried yet,
-and V.92 does not connect yet. RAS/PPP (Phase 5) is not started. The
+physical analog modem (US Robotics Courier 56K) calling in through a
+Cisco SPA112 FXS gateway connected at **V.34 31200/26400** and
+V.32bis 14400; through the gateway, V.90/V.92 does not start up yet, so
+such lines are limited to V.34. V.92 does not connect yet. RAS/PPP
+(Phase 5) is started: Windows Server 2022 RRAS answered that call and
+gave the Windows 11 caller a PPP session with internet access through
+NAT, with two workarounds (edited Unimodem init strings, and
+V.42bis/V.44 off). Legacy clients have not dialled in yet. The
 service mode, control API and Manager have been run on Windows XP as a
 Windows service, with a live V.90 call watched in the Manager (the
 screenshot above). Details in `docs/ROADMAP.md`.
@@ -129,8 +136,9 @@ configuration is in `build/VoIPModem.Toolset.props`.
      (default: `voipmodem.ini` next to the exe), then
      `net start VoIPModem`. `VoIPModem.exe --uninstall` removes it. The
      Manager's File menu can install, start, stop and restart it too.
-4. Use the line from the modem-driver side: RAS, or a terminal on the
-   paired COM port. `ATDT<extension>` dials; `ATA` or `ATS0=<n>` answers.
+4. Use the line from the modem-driver side: RAS (step by step in
+   `docs/WINDOWS_RAS_DIALIN.md`), or a terminal on the paired COM port.
+   `ATDT<extension>` dials; `ATA` or `ATS0=<n>` answers.
    `CONNECT <rate>` means the modem link is up; after that the port
    carries data. `+++` (with a second of silence before and after)
    returns to command mode, and `ATH` hangs up.
