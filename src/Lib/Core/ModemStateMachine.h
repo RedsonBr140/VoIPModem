@@ -26,6 +26,22 @@ struct ExecutionOutcome {
     bool hasResult = true;
 };
 
+// What ModemStateMachine::HandlePeerDtrChange() did about the DTE's DTR
+// line, per the AT&D setting. `response` is what to send the DTE, if
+// anything (only &D1's OK; a &D2/&D3 hangup is reported by the call
+// controller's Ended event as NO CARRIER, as for ATH).
+enum class DtrAction {
+    None,                // &D0, DTR rising, or nothing to act on
+    OnlineCommandMode,   // &D1: left OnlineData, call still up
+    HungUp,              // &D2: hung up, back in command mode
+    HungUpAndReset       // &D3: hung up if in a call, then as ATZ
+};
+
+struct DtrOutcome {
+    DtrAction action = DtrAction::None;
+    ExecutionOutcome response;
+};
+
 // The modem core: owns modem state, the ATE/ATV/ATQ profile, and the
 // S-register bank, and executes parsed AT commands against them. It talks
 // to telephony only through ICallController, so it has no idea whether
@@ -67,6 +83,37 @@ public:
     // currently in OnlineData.
     void EnterCommandModeFromOnlineData();
 
+    // --- Serial control signals (docs/ARCHITECTURE.md "Serial control
+    // signals"). ModemInstance reads and drives the port; the decisions
+    // are made here.
+
+    // True from a Connected event until the call ends (Ended, ATH, or a
+    // DTR hangup), including online command mode after "+++".
+    bool DataLinkUp() const { return dataLinkUp_; }
+
+    // Whether DCD should be on: always under &C0, only while the data
+    // link is up under &C1.
+    bool CarrierAsserted() const { return profile_.dcdMode == 0 || dataLinkUp_; }
+
+    // The DTE's DTR as last reported (debounced) by HandlePeerDtrChange().
+    // Starts true, so a line whose DTR is never reported behaves as before.
+    bool DteReady() const { return dteReady_; }
+
+    // Records the DTE's DTR level without acting on it: the level found
+    // when the port opens is a starting point, not a drop.
+    void SetDteReady(bool ready) { dteReady_ = ready; }
+
+    // S0 auto-answer may run: not while DTR is low, unless &D0.
+    bool AutoAnswerAllowed() const { return profile_.dtrMode == 0 || dteReady_; }
+
+    // The DTE raised (true) or dropped (false) DTR. A drop is acted on
+    // per AT&D only while a call is in progress: dialing, answering after
+    // ATA or auto-answer, training, online, or online command mode. An
+    // incoming call that is only ringing is left ringing; with DTR low it
+    // is not auto-answered (see AutoAnswerAllowed()). &D3 resets as ATZ
+    // even with no call.
+    DtrOutcome HandlePeerDtrChange(bool asserted);
+
     ModemState CurrentState() const { return state_; }
     const ModemProfile& Profile() const { return profile_; }
     const SRegisters& Registers() const { return registers_; }
@@ -81,6 +128,8 @@ public:
 
 private:
     ExecutionOutcome ExecuteExtendedCommand(const AtCommand& cmd) const;
+    bool CallInProgress() const;
+    void HangUpForDtr();
 
     ICallController& callController_;
     TaggedLogger& logger_;
@@ -89,6 +138,8 @@ private:
     ModemProfile profile_;
     SRegisters registers_;
     bool hasIncomingCall_ = false;
+    bool dataLinkUp_ = false;
+    bool dteReady_ = true;
     std::string lastDialedNumber_;
 };
 

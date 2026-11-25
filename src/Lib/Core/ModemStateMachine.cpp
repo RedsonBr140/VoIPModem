@@ -69,8 +69,10 @@ ExecutionOutcome ModemStateMachine::Execute(const AtParseResult& parsed) {
                 profile_.speakerMode = cmd.numericParam.value_or(0);
                 break;
 
-            // Stored only; see ModemProfile.h. The parser has already
-            // rejected out-of-range values.
+            // &C and &D are acted on through CarrierAsserted() and
+            // HandlePeerDtrChange(); &K, X and N are stored only. See
+            // ModemProfile.h. The parser has already rejected
+            // out-of-range values.
             case AtCommandType::SetDcdMode:
                 profile_.dcdMode = cmd.numericParam.value_or(0);
                 break;
@@ -133,6 +135,7 @@ ExecutionOutcome ModemStateMachine::Execute(const AtParseResult& parsed) {
                 logger_.Info("ATH hanging up");
                 callController_.HangUp();
                 hasIncomingCall_ = false;
+                dataLinkUp_ = false;
                 state_ = ModemState::CommandMode;
                 break;
 
@@ -229,6 +232,7 @@ ExecutionOutcome ModemStateMachine::HandleCallEvent(const CallEvent& event) {
 
         case CallEventType::Connected:
             hasIncomingCall_ = false;
+            dataLinkUp_ = true;
             state_ = ModemState::OnlineData;
             outcome.finalResult = ResultCode::Connect;
             if (event.connectRateBps > 0) {
@@ -238,6 +242,7 @@ ExecutionOutcome ModemStateMachine::HandleCallEvent(const CallEvent& event) {
 
         case CallEventType::Ended:
             hasIncomingCall_ = false;
+            dataLinkUp_ = false;
             state_ = ModemState::CommandMode;
             outcome.finalResult = event.result;
             return outcome;
@@ -245,6 +250,79 @@ ExecutionOutcome ModemStateMachine::HandleCallEvent(const CallEvent& event) {
 
     outcome.hasResult = false;
     return outcome;
+}
+
+bool ModemStateMachine::CallInProgress() const {
+    if (dataLinkUp_) {
+        return true; // includes online command mode after "+++"
+    }
+    switch (state_) {
+        case ModemState::Dialing:
+        case ModemState::Negotiating:
+        case ModemState::OnlineData:
+        case ModemState::Disconnecting:
+            return true;
+        case ModemState::Answering:
+            return !hasIncomingCall_; // after ATA/auto-answer, not while only ringing
+        case ModemState::CommandMode:
+        default:
+            return false;
+    }
+}
+
+void ModemStateMachine::HangUpForDtr() {
+    callController_.HangUp();
+    hasIncomingCall_ = false;
+    dataLinkUp_ = false;
+    state_ = ModemState::CommandMode;
+}
+
+DtrOutcome ModemStateMachine::HandlePeerDtrChange(bool asserted) {
+    DtrOutcome result;
+    result.response.hasResult = false;
+    result.response.suppressFinalResult = profile_.quietMode;
+
+    dteReady_ = asserted;
+    if (asserted) {
+        return result;
+    }
+
+    switch (profile_.dtrMode) {
+        case 1:
+            if (state_ == ModemState::OnlineData) {
+                state_ = ModemState::CommandMode; // call and data link stay up
+                logger_.Info("DTR dropped (&D1): online command mode, call still up");
+                result.action = DtrAction::OnlineCommandMode;
+                result.response.hasResult = true;
+                result.response.finalResult = ResultCode::OK;
+            }
+            return result;
+
+        case 2:
+            if (CallInProgress()) {
+                logger_.Info("DTR dropped (&D2): hanging up");
+                HangUpForDtr();
+                result.action = DtrAction::HungUp;
+            }
+            return result;
+
+        case 3:
+            if (CallInProgress()) {
+                logger_.Info("DTR dropped (&D3): hanging up and resetting");
+                HangUpForDtr();
+            } else {
+                logger_.Info("DTR dropped (&D3): resetting");
+            }
+            profile_.ResetToFactoryDefaults();
+            registers_.ResetToFactoryDefaults();
+            state_ = ModemState::CommandMode;
+            result.action = DtrAction::HungUpAndReset;
+            return result;
+
+        case 0:
+        default:
+            return result;
+    }
 }
 
 } // namespace voipmodem
