@@ -40,7 +40,7 @@ runs:
 
     - name: Restore pjproject build
       id: pjcache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: third_party/pjproject/lib
         key: ${{ steps.pjkey.outputs.key }}
