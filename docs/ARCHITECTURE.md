@@ -344,8 +344,12 @@ generic "(Standard Modem Types)" driver (Device Manager, Add legacy
 hardware, Modem) on the **other** side of each com0com pair from the port
 VoIPModem opens (VoIPModem on COM3, driver on COM4). Check the pairing
 with com0com's `setupc.exe list` (run elevated); pairs are not always
-adjacent numbers. RAS is then configured against that modem; VoIPModem
-does no PPP itself (see `PROJECT_SPEC.md` and the roadmap's Phase 5).
+adjacent numbers. Both ends need real `COM#` names ("use Ports class",
+or `PortName=COM#`): the modem wizard does not list com0com's default
+`CNCA0`/`CNCB0` names. RAS is then configured against that modem;
+VoIPModem does no PPP itself (see `PROJECT_SPEC.md` and the roadmap's
+Phase 5). `WINDOWS_RAS_DIALIN.md` is the step-by-step RRAS setup that
+was verified, with its workarounds and what is not tested.
 
 ## Known limitations
 
@@ -355,6 +359,11 @@ does no PPP itself (see `PROJECT_SPEC.md` and the roadmap's Phase 5).
 - **Calling a modem that opens with V.8bis**: libv90modem's calling side
   waits a fixed 10 s for the answer tone (not exposed in its API). A far
   modem that spends longer on V.8bis before ANSam is missed.
+- **PPP stalls with V.42bis/V.44 on**: under RRAS, data from the caller
+  stopped right after PPP authentication; with `Compression=0` it flows.
+  Not yet investigated. See `WINDOWS_RAS_DIALIN.md`, Known issues.
+- **Through an FXS gateway**, V.90/V.92 start-up has failed with a
+  physical modem; lines are limited to V.34 for such callers.
 - **No call-audio recording** on our side yet, so a failed call can only
   be diagnosed from logs and the far end's capture.
 - **Escape sequence**: online data mode passes every byte to the modem

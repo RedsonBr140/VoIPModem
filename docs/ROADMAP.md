@@ -9,8 +9,8 @@ just coded. `ARCHITECTURE.md` describes how each part works.
 | 1. Serial modem skeleton | **Complete**, verified with a terminal emulator |
 | 2. SIP call control | **Complete**, verified against Asterisk |
 | 3. RTP audio | **Complete**, verified live; media path retuned for modems in Phase 4 |
-| 4. Modem interoperability | **In progress**: real data links at up to V.90 with a SIP softmodem; physical analog modem not yet tested |
-| 5. Windows networking (RAS/PPP) | Not started |
+| 4. Modem interoperability | **In progress**: up to V.90 with a SIP softmodem; a physical modem through an FXS gateway connects at up to V.34 (V.90 start-up fails) |
+| 5. Windows networking (RAS/PPP) | **Started**: RRAS on Server 2022 answered a physical modem; PPP session, internet through NAT, with workarounds; legacy client not yet tested |
 | 6. Compatibility and optimization | **Started**: x64 + Win32 builds; XP Win32 build runs on 32-bit XP (V.34 call live); XP x64 / Server 2003 not yet built; Windows service + control API + VoIPModem Manager built |
 
 ## Phase 1 — Serial modem skeleton — complete
@@ -115,11 +115,30 @@ Problems these calls found, each fixed before the next:
    and stayed up.
 4. A dead modem or V.42 link left the SIP call up; it now hangs up.
 
+### Live results with a physical modem (2026-11-24)
+
+The first calls from a physical analog modem: a US Robotics Courier 56K
+on the PHONE 1 port of a Cisco SPA112 FXS gateway (firmware
+1.4.1(SR5)), registered with Asterisk 20.12, G.711 u-law only. The
+Courier called; VoIPModem 0.0.1 answered, under Windows Server 2022
+RRAS (Phase 5). The SPA112's settings are in `WINDOWS_RAS_DIALIN.md`.
+
+| Link | Result |
+|---|---|
+| **V.32bis 14400/14400** | Connected, stable |
+| **V.34 31200/26400** | Connected, zero CRC and framing errors counted by RRAS |
+| Default offer (V.92, V.90 first) | "libv90modem: modem ended -- start-up failed", every call |
+
+So through the gateway, lines are limited to V.34 (`Modulations=`) for
+now. This does not contradict the V.90 result above, which had no
+analog leg. VoIPModem calling the physical modem has not been tried.
+
 ### Open
 
-- **Physical analog modem**: the actual acceptance test. A real modem
-  through the Cisco FXS gateway, both calling into a line and being
-  called, has not been tried with the modem engine.
+- **Physical analog modem**: the acceptance test. Calling into a line,
+  it connects at up to V.34 (above). Still open: V.90/V.92 start-up
+  through the gateway fails (cause not investigated), and VoIPModem
+  calling the physical modem has not been tried.
 - **V.92**: answering, calls settle at V.90. On one call (before the
   jitter-buffer fix) our side retrained with Tone B while BinModem was
   setting up its V.92 PCM upstream. Not yet known whether that was the
@@ -130,7 +149,8 @@ Problems these calls found, each fixed before the next:
   9.4 s before ANSam, so it was turned off on BinModem for our calls.
   Raising this needs an upstream API change (`tone_ms` is internal).
 - **V.32bis 9600** (the spec's suggested first target) has not been
-  tested live by itself; the modes above went past it.
+  tested live by itself; V.32bis connected at 14400 with the physical
+  modem.
 - **Error handling, disconnects and reconnection** under the criterion:
   clean far-end and near-end hang-ups have been seen; repeated
   back-to-back calls on one line and retrains mid-call have not been
@@ -138,13 +158,49 @@ Problems these calls found, each fixed before the next:
 - **Call-audio recording** (both directions, our side) for diagnosis and
   for replay through `v90m-replay`.
 
-## Phase 5 — Windows networking (RAS/PPP) — not started
+## Phase 5 — Windows networking (RAS/PPP) — started
 
 VoIPModem is a modem bank: Windows Server's own RAS terminates PPP
 through the modem driver on the com0com port. No PPP code goes into
 VoIPModem. The work is configuring RAS on those modem ports and proving a
 full dial-up session (the legacy client dialling in and exchanging IP
-traffic).
+traffic). The setup, step by step, is in `WINDOWS_RAS_DIALIN.md`.
+
+### Verified (2026-11-24)
+
+- Windows Server 2022 RRAS (dial-up access and NAT) on two VoIPModem
+  lines, com0com 3.0.0.0 and the "Standard 56000 bps Modem" driver.
+- The Courier 56K through the SPA112 (Phase 4) called from Windows 11
+  dial-up networking. RRAS answered on `RING`, the port reached
+  "Authenticated" (MS-CHAP v2), the client got an address from RRAS's
+  static pool and reached the internet through NAT. The modem link was
+  V.34 with V.42 on and V.42bis/V.44 off.
+- Dial-in permission both per user and by group through a network
+  policy (Windows group and NAS port type Async).
+
+### Workarounds in that session
+
+- **Unimodem init strings**: VoIPModem 0.0.1 answers `ERROR` to `&C1`,
+  `&D2`, `&K3`, `N1` and `X4`, so those were removed from the driver's
+  registry strings. A pending parser change accepts them.
+- **Compression off**: with V.42bis/V.44 on, PPP authenticated and then
+  no more data arrived from the client, with no CRC errors. With
+  `Compression=0` traffic flowed. Root cause not investigated.
+- **Maximum rate V.34**: see Phase 4.
+
+### Open
+
+- The phase's criterion: a legacy client (Windows 9x, 2000, XP) dialling
+  in and exchanging IP traffic. Only Windows 11 has dialled in.
+- The V.42bis/V.44 data stall above.
+- Hang-up takes about 20 s: DCD is not driven and DTR drops are not acted
+  on, so Unimodem falls back to `+++` and `ATH`. A pending change honors
+  `&C`/`&D`; not yet confirmed against RRAS.
+- "Query Modem" run while the line is ringing shows COMMAND NOT
+  SUPPORTED for several identification commands.
+- Not tested: Server 2003 or XP as the RAS host, Multilink PPP, more than
+  two lines, PSTN callers through a SIP trunk, com0com 2.2.2.0 with Secure
+  Boot on.
 
 ## Phase 6 — Compatibility and optimization — started
 
@@ -227,8 +283,9 @@ after `docs/design` (a mock-up in the Windows Server 2003 style).
 
 ## Recommended next step
 
-Call a line from a **physical analog modem** through the FXS gateway,
-with VoIPModem answering, and check the link the same way as above. That
-is Phase 4's acceptance test, and it exercises the analog path the softmodem
-tests did not. Then, in order: V.92 (with call-audio recording on our side
-to diagnose it), repeated calls and retrains, and Phase 5.
+Find the **V.42bis/V.44 data stall** under PPP (Phase 5): its cause is
+unknown, and turning compression off costs throughput on every call. Then, in order: a legacy
+client dialling in through RRAS (Phase 5's criterion); V.90 start-up
+through the FXS gateway and V.92, with call-audio recording on our side
+to diagnose both; VoIPModem calling the physical modem; repeated calls
+and retrains.
