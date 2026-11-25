@@ -97,13 +97,15 @@ SipPassword=<password>
 
 The second line is the same with `ComPort=COM5` and its own extension.
 
-## 4. Unimodem init strings (workaround)
+## 4. Unimodem init strings (0.0.1 only)
 
-**Workaround.** VoIPModem 0.0.1 answers `ERROR` to `&C1`, `&D2`, `&K3`,
-`N1` and `X4`, which the Standard 56000 bps Modem driver sends when RRAS
-opens the port. Unimodem then closes the port, and RRAS never waits for
-calls. A pending change to VoIPModem's command parser accepts these
-commands; until it is released, take them out of the driver's strings:
+**VoIPModem 0.0.2 and later accept these commands; skip this section.**
+The stock strings with 0.0.2 have not been tested yet (see section 10).
+
+**Workaround for 0.0.1.** VoIPModem 0.0.1 answers `ERROR` to `&C1`,
+`&D2`, `&K3`, `N1` and `X4`, which the Standard 56000 bps Modem driver
+sends when RRAS opens the port. Unimodem then closes the port, and RRAS
+never waits for calls. With 0.0.1, take them out of the driver's strings:
 
 1. Find the modem's driver key: the modem's Properties > Details > "Driver
    key". It ends in `\000n`. The full key is
@@ -127,8 +129,8 @@ Expected in the modem log after the change: both init commands return
 `OK`, then "Waiting for a call" and `ATS0=0`; when a call arrives, `RING`
 followed by `ATA`.
 
-Once the parser change is released, the stock strings should no longer
-need editing; that has **not been tested** yet (see section 10).
+With 0.0.2 the stock strings should no longer need editing; that has
+**not been tested** yet (see section 10).
 
 ## 5. RRAS
 
@@ -239,7 +241,7 @@ proven necessary.
   libv90modem's data-mode compression.
 - **Hang-up takes about 20 s.** VoIPModem 0.0.1 does not drive DCD from
   the call or act on DTR drops, so Unimodem waits, then sends `+++` and
-  `ATH`. A pending change honors `&C`/`&D` (DCD only while the data link
+  `ATH`. VoIPModem 0.0.2 honors `&C`/`&D` (DCD only while the data link
   is up, DTR drop hangs up); it has unit tests but has not yet been
   confirmed against RRAS.
 - **"Query Modem"** (modem Properties > Diagnostics) shows COMMAND NOT
@@ -265,4 +267,4 @@ None of these has been tried. Do not assume they work:
 - com0com 2.2.2.0 with Secure Boot on.
 - VoIPModem calling out to the physical modem (RRAS here is inbound
   only).
-- The stock Unimodem init strings with the pending parser change.
+- The stock Unimodem init strings with VoIPModem 0.0.2.

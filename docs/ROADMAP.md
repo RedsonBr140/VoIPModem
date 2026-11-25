@@ -182,7 +182,8 @@ traffic). The setup, step by step, is in `WINDOWS_RAS_DIALIN.md`.
 
 - **Unimodem init strings**: VoIPModem 0.0.1 answers `ERROR` to `&C1`,
   `&D2`, `&K3`, `N1` and `X4`, so those were removed from the driver's
-  registry strings. A pending parser change accepts them.
+  registry strings. VoIPModem 0.0.2 accepts them (stock strings not yet
+  tested).
 - **Compression off**: with V.42bis/V.44 on, PPP authenticated and then
   no more data arrived from the client, with no CRC errors. With
   `Compression=0` traffic flowed. Root cause not investigated.
@@ -194,7 +195,7 @@ traffic). The setup, step by step, is in `WINDOWS_RAS_DIALIN.md`.
   in and exchanging IP traffic. Only Windows 11 has dialled in.
 - The V.42bis/V.44 data stall above.
 - Hang-up takes about 20 s: DCD is not driven and DTR drops are not acted
-  on, so Unimodem falls back to `+++` and `ATH`. A pending change honors
+  on, so Unimodem falls back to `+++` and `ATH`. VoIPModem 0.0.2 honors
   `&C`/`&D`; not yet confirmed against RRAS.
 - "Query Modem" run while the line is ringing shows COMMAND NOT
   SUPPORTED for several identification commands.
