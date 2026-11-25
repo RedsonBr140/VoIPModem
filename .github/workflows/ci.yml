@@ -59,8 +59,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Linux: the library and the unit tests through CMake (docs/LINUX.md).
-  # No Linux executable yet.
+  # Linux: the library, the voipmodem executable and the unit tests
+  # through CMake (docs/LINUX.md).
   linux:
     name: Linux ${{ matrix.configuration }}
     runs-on: ubuntu-24.04

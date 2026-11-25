@@ -2,7 +2,7 @@
 
 ## Project Identity
 
-VoIPModem is a Windows-first software modem that emulates a Hayes-compatible serial modem and transports modem calls over an existing SIP/VoIP infrastructure.
+VoIPModem is a Windows-first software modem that emulates a Hayes-compatible serial modem and transports modem calls over an existing SIP/VoIP infrastructure. Linux is also a supported host (see `docs/LINUX.md`).
 
 The long-term goal is to allow legacy computers, including Windows 98 systems with physical analog modems, to dial into a virtual modem endpoint and establish real modem data connections and PPP networking sessions.
 
@@ -10,7 +10,7 @@ The long-term goal is to allow legacy computers, including Windows 98 systems wi
 
 1. Inspect the existing repository, source code, configuration, dependencies, and tests before proposing or implementing changes.
 2. Read `docs/PROJECT_SPEC.md` for the complete requirements and intended use case.
-3. Read `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` if they exist.
+3. Read `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` if they exist, and `docs/LINUX.md` for anything that touches Linux.
 4. Identify implemented, partially implemented, missing, and broken functionality.
 5. Preserve working behavior unless a change is justified and explicitly accounted for.
 
@@ -19,8 +19,9 @@ Do not assume the repository matches the proposed architecture or that any featu
 ## Core Requirements
 
 - Windows-first development, using C++ and Visual Studio.
+- Linux host support: CMake build alongside the Visual Studio solution. Keep both builds working.
 - Hayes-compatible serial modem emulation.
-- Virtual COM port support, initially using com0com.
+- Virtual COM port support, initially using com0com; on Linux, a pseudo-terminal per line.
 - Integration with an existing Asterisk SIP infrastructure.
 - Incoming calls are mandatory; outgoing calls are also required.
 - Actual modem modulation and demodulation are required for end-to-end modem interoperability.

@@ -7,10 +7,11 @@ or responsibilities change.
 
 ## Overview
 
-VoIPModem is a modem bank in software. Each configured line is one
-modem: a Hayes-compatible serial port on one side (a com0com virtual
-port that Windows' own modem driver and RAS talk to), and a SIP
-extension on the other. When a call is up, the call's G.711 audio is
+VoIPModem is a modem bank in software, for Windows and Linux. Each
+configured line is one modem: a Hayes-compatible serial port on one side
+(on Windows, a com0com virtual port that Windows' own modem driver and
+RAS talk to; on Linux, a pseudo-terminal that pppd, mgetty or a terminal
+program opens), and a SIP extension on the other. When a call is up, the call's G.711 audio is
 run through a real softmodem, libv90modem, which does V.8 and the
 modulation (V.21 up to V.90/V.92), and V.42 error control with
 V.42bis/V.44 compression. The bytes that come out are passed to the
@@ -18,23 +19,29 @@ serial port, and the bytes from the serial port go out over the modem
 link.
 
 ```
- Windows RAS / terminal                                Asterisk  <-->  far modem
+ RAS, pppd / terminal                                  Asterisk  <-->  far modem
         |                                                 ^
-   com0com pair                                           | SIP + RTP (G.711)
+ com0com pair / PTY                                       | SIP + RTP (G.711)
         |                                                 |
   [ serial / Hayes ] -- [ modem state machine ] -- [ SIP call ] -- [ call audio <-> libv90modem + V.42 ]
 ```
 
 The layers are kept apart, as the spec requires: SIP call establishment,
-the modem link (libv90modem reaching data mode) and PPP (Windows RAS,
-later) are separate states, and success at one is never taken as success
+the modem link (libv90modem reaching data mode) and PPP (Windows RAS or
+pppd, outside VoIPModem) are separate states, and success at one is never taken as success
 at another. `CONNECT` is reported only when the modem link is up.
 
-VoIPModem runs headless, in a console or as a Windows service, and is
-operated through a **control API** (JSON lines over TCP, localhost by
-default; `CONTROL_API.md`). **VoIPModem Manager** (`VoIPModemManager.exe`)
-is a separate Win32 program that only talks to that API, so the service
-runs without it, and it can watch a service on another computer.
+VoIPModem runs headless (on Windows in a console or as a Windows
+service, on Linux as a foreground process) and is operated through a
+**control API** (JSON lines over TCP, localhost by default;
+`CONTROL_API.md`). **VoIPModem Manager** (`VoIPModemManager.exe`) is a
+separate Win32 program that only talks to that API, so the service runs
+without it, and it can watch a service on another computer, Linux
+included.
+
+Linux-specific parts (the PTY serial port and its emulated control
+lines, the entry point, the CMake build) are summarised here and
+described in `LINUX.md`.
 
 ## Module layout
 
@@ -43,9 +50,9 @@ src/
   Lib/                     VoIPModemLib (static library)
     Core/                  Modem state machine, result codes, ICallController seam
     Hayes/                 AT command parsing
-    Serial/                Serial port abstraction + Win32 implementation
+    Serial/                ISerialPort; WindowsSerialPort (Win32 COM API), PtySerialPort (Linux PTY)
     Sip/                   PjsipEndpoint, PjsipCallController, CallAudioBridge (the modem)
-    Audio/                 WindowsAudioOutput: optional local "modem speaker"
+    Audio/                 WindowsAudioOutput: optional local "modem speaker" (Windows only)
     Dsp/                   Dial tone/DTMF generators for the local speaker (+ a Goertzel detector their tests use)
     Config/                INI loading, AppConfig (one ModemInstanceConfig per line), IniDocument (writes the ini, keeping comments)
     Control/               ControlServer (the API's TCP transport), LineStatus, ServiceStats, SystemInfo (COM ports, com0com pairs, modem drivers)
@@ -55,7 +62,8 @@ src/
     Application.*          Loads config, owns Logger + PjsipEndpoint + ControlServer, runs and reconfigures the lines, answers the API
     ModemInstance.*        One modem line: port, call controller, state machine, session, thread; status and call bookkeeping
     CommandLineSession.*   Line buffering, local echo, response framing
-    main.cpp               Entry point: console (Ctrl+C), Windows service, --install / --uninstall
+    main.cpp               Windows entry point: console (Ctrl+C), Windows service, --install / --uninstall
+    main_linux.cpp         Linux entry point: foreground process, SIGINT/SIGTERM
   Manager/                 VoIPModemManager (Win32 GUI; no PJSIP, no modem engine)
     MainWindow.cpp         Main window: lines list, statistics, carrier, event log, status bar
     Dialogs.*              Connect, line properties / new line, settings, self-test, ports, SIP trace, AT console, about
@@ -65,12 +73,16 @@ third_party/
   pjproject/               PJSIP 2.17, git submodule, built from source
   pjsip-config/            VoIPModem's config_site.h for pjproject
   libv90modem/             libv90modem 0.6.0, git submodule (GPL-2.0-only)
-  libv90modem-build/       libv90modem.vcxproj: MSVC build of the submodule
+  libv90modem-build/       libv90modem.vcxproj: MSVC build of the submodule (Linux uses its Makefile)
   nlohmann/                JSON for Modern C++ 3.11.3, single header (MIT), for the control API
 build/
   VoIPModem.props          Imported by every project: output folders, PJSIP paths and library name
 scripts/
   setup-pjproject.ps1      One-time setup: init the pjproject submodule + place config_site.h
+config/
+  voipmodem.ini.sample     Sample configuration, every key commented
+  voipmodem.service        systemd unit (Linux)
+CMakeLists.txt             Linux build: PJSIP and libv90modem from the submodules, the library, voipmodem, the tests
 ```
 
 All modem signal processing is libv90modem's; VoIPModem has no DSP of
@@ -80,7 +92,7 @@ its own beyond those local-speaker sounds.
 
 ```
 main.cpp -> Application -> ModemInstance (one per line) -> CommandLineSession -> ModemStateMachine (Core)
-                        \-> PjsipEndpoint (shared)      \-> WindowsSerialPort -> AtCommandParser (Hayes)
+                        \-> PjsipEndpoint (shared)      \-> ISerialPort -> AtCommandParser (Hayes)
                         \-> ControlServer               \-> ICallController (Core)
                         \-> ServiceStats <--------------/     implemented by: NullCallController
                                                                              | PjsipCallController -> CallAudioBridge -> libv90modem
@@ -95,8 +107,9 @@ are the two implementations.
 
 ## Modem lines (ModemInstance)
 
-Each configured line is a `ModemInstance` with its own
-`WindowsSerialPort`, `ICallController`, `ModemStateMachine` and
+Each configured line is a `ModemInstance` with its own serial port
+(`WindowsSerialPort`, or `PtySerialPort` on Linux; chosen at compile
+time in `ModemInstance.h`), `ICallController`, `ModemStateMachine` and
 `CommandLineSession`, running its own loop on its own thread. Lines share
 only the `Logger` (through a `TaggedLogger` that prefixes each line's
 messages, e.g. `[Line1]`) and the process-wide `PjsipEndpoint`.
@@ -193,6 +206,12 @@ or `+` followed by anything but `AT`, is still `ERROR`.
 
 ### Serial control signals
 
+This section describes Windows and com0com. The decisions in
+`ModemStateMachine` are the same on Linux, but a PTY has no control
+lines, so there DTR and DCD are emulated (the DTE's DTR is "the port is
+open"; a carrier drop replaces the PTY); see `LINUX.md`, "Emulated modem
+control lines".
+
 VoIPModem's port is the modem (DCE) end of the line, but a com0com pair
 is two DTE-style ports wired back to back: there is no DCD output to
 drive. With com0com's **default wiring** each port's DTR drives the other
@@ -272,7 +291,9 @@ own `pjproject-vs14.sln`, target `libpjproject` (the aggregate of pjlib,
 pjmedia, pjnath, pjsip, pjsua2 and codecs), with `PlatformToolset`
 overridden to `v145`. `scripts/setup-pjproject.ps1` copies
 `third_party/pjsip-config/config_site.h` into place first, since
-pjproject requires but does not track it.
+pjproject requires but does not track it. On Linux, `CMakeLists.txt`
+builds the same submodule with pjproject's own CMake build and the same
+`config_site.h`.
 
 - **One endpoint per process** (`PjsipEndpoint`, owned by `Application`,
   started when `[SIP] LocalPort` is nonzero): pjsua2 allows one
@@ -316,7 +337,7 @@ not. `PjsipEndpoint::Start()` therefore sets:
 | PLC (G.711) | off | a missing frame must stay silence, not invented audio |
 | Jitter buffer | init 160 ms, min/max prefetch 120/400 ms, max 1000 ms, discard NONE (`[Media] JitterBufferMs` scales all four) | never run empty, never drop frames to cut latency |
 | Codec order | PCMU first (`[Media] Codec=PCMA` for A-law first) | both are offered; the far end picks |
-| Timer resolution | `timeBeginPeriod(1)` | with no sound card, the null device's clock drives the conference bridge and must tick steadily |
+| Timer resolution | `timeBeginPeriod(1)` (Windows only) | with no sound card, the null device's clock drives the conference bridge and must tick steadily |
 
 The jitter buffer and PLC settings matter most. With PJSIP's defaults (no
 prefetch, progressive discard, PLC on), the receive buffer ran empty
@@ -342,7 +363,7 @@ returns the samples to send. Upstream ships only a GNU Makefile;
 sources (`api/`, `modem/`, `v90/`, `v34/`, `v32/`, `v92/` and six `v42/`
 files) as a C11 static library with MSVC v145. It compiles cleanly
 (two warning classes from upstream's GCC pragmas and an intended shift
-disabled).
+disabled). On Linux, upstream's Makefile builds it.
 
 `CallAudioBridge` (src/Lib/Sip) is a `pj::AudioMediaPort` attached to
 the call's audio when PJSIP reports media active:
@@ -389,7 +410,8 @@ the call's audio when PJSIP reports media active:
 - **Local speaker** (`EnableLocalAudio=1`): each frame's RX and TX are
   mixed to the PC's default output through `WindowsAudioOutput`, and
   `ModemInstance` plays a dial tone and the DTMF digits when dialling,
-  like a modem speaker. It has no effect on the call.
+  like a modem speaker. It has no effect on the call. Windows only: on
+  Linux the setting is logged and ignored.
 
 ## Configuration keys
 
@@ -420,6 +442,12 @@ is System32, so relative paths in the ini are taken from the ini's own
 folder. `service.restart` ends `Application::Run()` and `main` runs a
 new one in the same process (PJSIP is torn down and created again).
 
+On Linux, `main_linux.cpp` runs `Application` in the foreground (default
+config: `voipmodem.ini` in the current directory), restarts it the same
+way, and stops it on SIGINT or SIGTERM, taken by a thread with
+`sigwait()` rather than in a signal handler. `config/voipmodem.service`
+runs it under systemd. There is no `--install`.
+
 `Application::Run()`'s thread (the "main" thread, which created the PJSIP
 endpoint) owns the list of lines. The `ControlServer` serves each client
 connection on its own thread; read-only requests (`status`, `log`,
@@ -449,6 +477,12 @@ port directly) and File > Start/Install service (the local service
 control manager). Its connection target and window layout are kept under
 `HKCU\Software\VoIPModem\Manager`; the password is not stored.
 
+The Manager answers and hangs up calls but never dials: outgoing calls
+are dialled by whatever drives the line's port (`ATD`), as with a
+hardware modem. Against a Linux service it works the same, except that
+the com0com pairs and modem drivers window is empty (`system.ports`
+returns nothing there).
+
 ## Windows integration
 
 Windows does not see a bare com0com port as a modem. Install the
@@ -461,7 +495,18 @@ or `PortName=COM#`): the modem wizard does not list com0com's default
 `CNCA0`/`CNCB0` names. RAS is then configured against that modem;
 VoIPModem does no PPP itself (see `PROJECT_SPEC.md` and the roadmap's
 Phase 5). `WINDOWS_RAS_DIALIN.md` is the step-by-step RRAS setup that
-was verified, with its workarounds and what is not tested.
+was verified, with its workarounds and what is not tested. The same
+modem can be dialled out from (Dial-Up Networking, a terminal program).
+
+## Linux integration
+
+VoIPModem creates a pseudo-terminal (PTY) per line and publishes a
+symlink to it at the line's `ComPort=` path (for example
+`/run/voipmodem/ttyVM0`). pppd, mgetty or a terminal program opens that
+path as if it were a modem's serial port, to answer or to dial. There is
+no modem driver to install. VoIPModem does no PPP itself here either.
+`LINUX.md` has the PTY details, the pppd and mgetty setups that were
+verified, and the Linux test results.
 
 ## Known limitations
 
@@ -480,7 +525,10 @@ was verified, with its workarounds and what is not tested.
   be diagnosed from logs and the far end's capture.
 - **Serial control signals**: DCD and DTR follow `&C`/`&D` (see "Serial
   control signals"); DSR on the driver side follows DCD, and RTS/CTS and
-  RI are not driven.
+  RI are not driven. On Linux they are emulated, with the limits listed
+  in `LINUX.md`.
+- **Linux**: what has not been tested there yet is listed in `LINUX.md`,
+  "Not tested".
 - **Escape sequence**: online data mode passes every byte to the modem
   except a valid `+++`; there is no `S2`/`S12` configurability.
 - **Ctrl+C shutdown** with several lines and calls up has only been

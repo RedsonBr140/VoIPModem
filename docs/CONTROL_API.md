@@ -1,9 +1,9 @@
 # VoIPModem — Control API
 
-The running service (`VoIPModem.exe`, console or Windows service) is
-operated through this API. VoIPModem Manager uses nothing else, and any
-other client (a script, a monitoring check, a future Linux front end) can
-do the same.
+The running service (`VoIPModem.exe` in a console or as a Windows
+service, or `voipmodem` on Linux) is operated through this API, the same
+on both. VoIPModem Manager uses nothing else, and any other client (a
+script, a monitoring check) can do the same.
 
 ## Transport
 
@@ -43,7 +43,8 @@ Args: `password` (when required), `client` (free text). Result:
  "passwordRequired": false}
 ```
 
-`pjsip` is empty when SIP is off (`[SIP] LocalPort=0`).
+`pjsip` is empty when SIP is off (`[SIP] LocalPort=0`). On Linux,
+`platform` is for example `"Linux, 64-bit"`.
 
 ### `status`
 
@@ -81,7 +82,7 @@ Everything the Manager's main window shows. Result:
 | `autoAnswerRings` | S0 now |
 | `canAnswer`, `canHangUp` | what the line can do now |
 | `pendingChanges` | saved settings wait for the call to end |
-| `driver` | Windows modem driver on the other side of the com0com pair: `"Standard 56000 bps Modem on COM4"`, `"(not bound) COM4"`, `"(no com0com pair)"` |
+| `driver` | Windows modem driver on the other side of the com0com pair: `"Standard 56000 bps Modem on COM4"`, `"(not bound) COM4"`, `"(no com0com pair)"` (always this on Linux) |
 
 - `stats` (since the service started): `incomingOffered`, `callsAnswered`,
   `trained`, `failedToTrain`, `rejectedBusy`, `hungUpEarly`,
@@ -152,7 +153,7 @@ it like `config.set` does.
 | `service.stop` | | stops the service (a Windows service reports stopped) |
 | `service.restart` | `force` | runs a fresh instance in the same process; refused during a call unless `force` |
 | `selftest` | `modulations` (`V21`, `V22`, `V32BIS`, `V34`; default `V34`) | two libv90modem modems back to back on a perfect line: `connected`, `modulation`, `txBps`, `rxBps`, `snrDb`, `lineSeconds`, `wallSeconds`, `failure` |
-| `system.ports` | | the service computer's `serialPorts` (`port`, `line`), `com0comPairs` (`a`, `b`, `lineA`, `lineB`), `modems` (`name`, `attachedTo`, `pairedWith`, `line`) |
+| `system.ports` | | the service computer's `serialPorts` (`port`, `line`), `com0comPairs` (`a`, `b`, `lineA`, `lineB`), `modems` (`name`, `attachedTo`, `pairedWith`, `line`); all three empty on Linux |
 
 ## Example (PowerShell)
 

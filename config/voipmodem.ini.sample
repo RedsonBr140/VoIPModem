@@ -1,7 +1,9 @@
 ; VoIPModem configuration.
-; Copy this file to voipmodem.ini next to the executable (or pass a path
-; as the first command-line argument) and adjust as needed. See
-; docs/ARCHITECTURE.md for what each part does.
+; Copy this file to voipmodem.ini and adjust as needed. VoIPModem reads
+; voipmodem.ini next to VoIPModem.exe on Windows, or in the current
+; directory on Linux, unless you pass a path as the first command-line
+; argument. See docs/ARCHITECTURE.md for what each part does, and
+; docs/LINUX.md for Linux.
 
 ; VoIPModem Manager (Settings, Line properties, New line) edits this file
 ; in place: it changes only the keys it sets and keeps comments.
@@ -63,9 +65,13 @@ LocalPort=5060
 ; default line: with no [Modem...] section, VoIPModem opens no COM port
 ; (add lines here or with VoIPModem Manager). Uncomment and set ComPort.
 ; [Modem]
-; The COM port VoIPModem opens: one side of a com0com pair. Windows'
-; modem driver (and RAS) binds to the OTHER side of the pair.
+; Windows: the COM port VoIPModem opens, one side of a com0com pair.
+; Windows' modem driver (and RAS) binds to the OTHER side of the pair.
 ; ComPort=COM3
+; Linux: the path where VoIPModem creates this line's port, a symlink to
+; a pseudo-terminal that pppd, mgetty or a terminal program opens. The
+; directory must exist.
+; ComPort=/run/voipmodem/ttyVM0
 
 ; DTE-to-modem serial speed on the virtual port. Not the modem-to-modem
 ; rate, which the modems negotiate and CONNECT reports.
@@ -95,7 +101,8 @@ LocalPort=5060
 
 ; 1 = play the call's audio (both directions mixed), plus the dial tone
 ; and DTMF digits when dialling, on this PC's default sound output, like
-; a modem speaker. Enable it on one line at most.
+; a modem speaker. Enable it on one line at most. Windows only; ignored
+; on Linux.
 ; EnableLocalAudio=0
 
 ; SIP registration for this line's extension. Leave SipServer empty (or
