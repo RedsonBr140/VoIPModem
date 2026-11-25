@@ -195,7 +195,11 @@ traffic). The setup, step by step, is in `WINDOWS_RAS_DIALIN.md`.
 
 - The phase's criterion: a legacy client (Windows 9x, 2000, XP) dialling
   in and exchanging IP traffic. Only Windows 11 has dialled in.
-- The V.42bis/V.44 data stall above.
+- The V.42bis/V.44 data stall above. Related (2026-11-25, Linux): a call
+  from BinModem with V.44 ended when our V.44 decoder rejected its data,
+  after heavy signal loss on BinModem's receive side (`LINUX.md`, "BinModem
+  calling a Linux line"). Since then, a V.42 disconnect is logged with its
+  reason by name and the V.42 counters.
 - Hang-up takes about 20 s: DCD is not driven and DTR drops are not acted
   on, so Unimodem falls back to `+++` and `ATH`. VoIPModem 0.0.2 honors
   `&C`/`&D`; not yet confirmed against RRAS.

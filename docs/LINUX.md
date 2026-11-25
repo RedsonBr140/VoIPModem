@@ -218,6 +218,36 @@ for the test user).
 | Modem | **V.90 56000/26400** bit/s via V.8 (VoIPModem sends 56000), SNR 37.7 dB, round trip 3842 samples; **V.42 LAPM with V.44** |
 | PPP | BinModem's PPP client refused EAP and asked for CHAP-MD5; authenticated with CHAP; IPCP gave it 10.250.250.2 (VJ compression) |
 | Traffic | Ping from the Linux host to the caller over the link: 0% loss, RTT about 600 ms |
+| Web through the link | BinModem's side ran an HTTP proxy over the PPP link; the Linux host routed for it (temporary NAT). The apple.com HTML (253 KB, TLS, so incompressible) took 82 s, about 3.1 KB/s on one connection |
+
+**A second call dropped after 3.3 minutes** of browsing (405 KB to
+BinModem, 182 KB back). The order of events, from both ends' logs:
+
+1. Line A's V.44 decoder rejected the data coming from BinModem, and
+   libv90modem released the V.42 link (`V90M_EC_R_COMPRESSION`, reason
+   17). The modem cleared down and VoIPModem hung up the call; pppd saw
+   "Modem hangup". BinModem did not hang up, and PPP did not end first.
+2. VoIPModem's media path was clean: 11.5 K RTP packets each way, no
+   loss, receive jitter at most 8.5 ms, and Asterisk reported no loss and
+   0.75 ms jitter for what VoIPModem sent.
+3. BinModem, for the same call, reported 4177 incoming packets that were
+   not there when its modem needed them (about 87 s of substituted
+   silence), "0 of them turned up late", between Asterisk and BinModem or
+   inside BinModem.
+
+So BinModem's receiver heard a badly damaged signal, which means heavy
+V.42 recovery in both directions; at some point the compressed data
+reaching our decoder was not what it expected. Whether BinModem's
+encoder or libv90modem's decoder is wrong is not known. Without
+compression, the same fault would corrupt a PPP packet instead of
+ending the call. Not yet repeated, and not yet tried with
+`Compression=0`. It matches the open V.42bis/V.44 issue from the
+Windows RRAS tests (`ROADMAP.md`, Phase 5).
+
+Since then, when V.42 disconnects during a call, VoIPModem logs the
+reason by name and libv90modem's V.42 counters at that moment (bad
+frames, retransmissions, REJ, T401 expiries, compression byte counts).
+That logging has not yet been seen on a failing call.
 
 At shutdown, each line logs `Unable to create/send REGISTER: Object is
 busy (PJSIP_EBUSY)` while it un-registers; it is the same harmless

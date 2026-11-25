@@ -69,6 +69,24 @@ const char* DescribeEcState(int s) {
     }
 }
 
+// Why V.42 disconnected (v90m_ec_status.reason; libv90modem's
+// docs/error-control.md).
+const char* DescribeEcReason(int r) {
+    switch (r) {
+        case V90M_EC_R_NONE: return "no reason given";
+        case V90M_EC_R_LOCAL: return "released by us";
+        case V90M_EC_R_PEER_DISC: return "released by the far end (DISC)";
+        case V90M_EC_R_PEER_DM: return "refused or dropped by the far end (DM)";
+        case V90M_EC_R_N400: return "no progress after N400 recovery attempts";
+        case V90M_EC_R_PROTOCOL: return "protocol error";
+        case V90M_EC_R_NEGOTIATION: return "negotiation failed";
+        case V90M_EC_R_NO_EC: return "the far end has no V.42";
+        case V90M_EC_R_COMPRESSION: return "compression error (V.42bis/V.44 decoder)";
+        case V90M_EC_R_NO_SABME: return "no SABME from the far end";
+        default: return "unknown reason";
+    }
+}
+
 const char* DescribeCompression(int alg) {
     switch (alg) {
         case V90M_EC_COMP_V42BIS: return "V.42bis";
@@ -310,7 +328,27 @@ void CallAudioBridge::LogErrorControlState() {
         if (state == V90M_EC_CONNECTED) {
             message += std::string(", compression ") + DescribeCompression(status.comp_alg);
         } else {
-            message += ", reason " + std::to_string(status.reason);
+            message += std::string(": ") + DescribeEcReason(status.reason) + " (reason " +
+                       std::to_string(status.reason) + ")";
+            logger_.Info(message);
+            // How the link fared up to here: heavy recovery (bad frames,
+            // retransmissions, REJ, T401) before a release points at the line.
+            std::string counters =
+                "libv90modem: V.42 counters: frames received " + std::to_string(status.rx_frames) +
+                ", bad " + std::to_string(status.rx_frames_bad) + "; I-frames sent " +
+                std::to_string(status.tx_i) + " (resent " + std::to_string(status.tx_i_retx) + "), received " +
+                std::to_string(status.rx_i) + " (discarded " + std::to_string(status.rx_i_dropped) +
+                "); REJ sent " + std::to_string(status.tx_rej) + ", received " + std::to_string(status.rx_rej) +
+                "; T401 expiries " + std::to_string(status.t401_expiries) + "; protocol violations " +
+                std::to_string(status.violations);
+            if (status.comp_alg != V90M_EC_COMP_NONE) {
+                counters += std::string("; ") + DescribeCompression(status.comp_alg) + " compressed " +
+                            std::to_string(status.comp_in) + " -> " + std::to_string(status.comp_out) +
+                            " bytes, decompressed " + std::to_string(status.decomp_in) + " -> " +
+                            std::to_string(status.decomp_out) + " bytes";
+            }
+            logger_.Info(counters);
+            return;
         }
     }
     logger_.Info(message);
