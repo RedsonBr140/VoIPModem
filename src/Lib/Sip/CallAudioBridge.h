@@ -9,7 +9,9 @@
 
 #include <pjsua2.hpp>
 
+#ifdef _WIN32
 #include "../Audio/WindowsAudioOutput.h"
+#endif
 #include "../Core/CallStatus.h"
 #include "../Logging/TaggedLogger.h"
 
@@ -55,6 +57,7 @@ namespace voipmodem {
 //
 // If `enableLocalAudio` is true, every frame's RX+TX mix also goes to
 // the PC's default sound output (WindowsAudioOutput), as a modem speaker.
+// Windows only: elsewhere the setting is logged and ignored.
 // The modem settings of one line (see ModemInstanceConfig).
 struct ModemOptions {
     std::string modulations;  // ModemInstanceConfig::modulations; empty = defaults
@@ -122,7 +125,10 @@ private:
     int lastEcState_ = -1;
     std::string modulationsDescription_; // for the start log line
     std::vector<std::int16_t> pendingTxSamples_;
+#ifdef _WIN32
     std::optional<WindowsAudioOutput> localSpeaker_;
+#endif
+    bool localAudio_ = false; // a speaker was opened (Windows only)
 
     mutable std::mutex dataMutex_; // guards the queues and the pending flags below
     std::deque<std::uint8_t> txByteQueue_;

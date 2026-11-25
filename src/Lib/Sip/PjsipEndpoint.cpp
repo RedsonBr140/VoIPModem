@@ -4,9 +4,11 @@
 
 #include <algorithm>
 
+#ifdef _WIN32
 #include <windows.h>
 #include <mmsystem.h>
 #pragma comment(lib, "winmm.lib")
+#endif
 
 namespace voipmodem {
 
@@ -54,7 +56,9 @@ PjsipEndpoint::~PjsipEndpoint() {
         } catch (const pj::Error& err) {
             logger_.Error("PJSIP libDestroy() failed: " + err.info());
         }
+#ifdef _WIN32
         timeEndPeriod(1);
+#endif
     }
 }
 
@@ -103,8 +107,11 @@ bool PjsipEndpoint::Start(const EndpointSettings& settings) {
         // No sound card: the null device's clock thread drives the
         // conference bridge, and at Windows' default ~15.6 ms sleep
         // granularity it pulls 20 ms frames in uneven bursts. 1 ms timer
-        // resolution for the process keeps that clock steady.
+        // resolution for the process keeps that clock steady. (Linux timers
+        // are already fine-grained.)
+#ifdef _WIN32
         timeBeginPeriod(1);
+#endif
 
         // One transport is created (below), UDP unless [SIP] Transport=TCP.
         // By default PJSIP moves any request of 1300 bytes or more from UDP

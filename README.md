@@ -41,7 +41,7 @@ Docs:
 - `docs/CONTROL_API.md`: the control API, for the Manager or your own scripts.
 - `docs/WINDOWS_RAS_DIALIN.md`: Windows RRAS answering dial-up calls on VoIPModem's lines.
 - `docs/ROADMAP.md`: phase status and test results.
-- `docs/LINUX.md`: the Linux port (planned, not yet built).
+- `docs/LINUX.md`: the Linux port (in progress: library and tests build; no Linux executable yet).
 - `docs/design/`: the Manager's design mock-up.
 
 ## Status

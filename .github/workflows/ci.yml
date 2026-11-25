@@ -58,3 +58,29 @@ jobs:
             config/voipmodem.ini.sample
           if-no-files-found: error
           retention-days: 14
+
+  # Linux: the library and the unit tests through CMake (docs/LINUX.md).
+  # No Linux executable yet.
+  linux:
+    name: Linux ${{ matrix.configuration }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+
+    steps:
+      # Only the submodules the Linux build uses (not pjproject-xp).
+      - uses: actions/checkout@v7
+      - name: Check out submodules
+        run: git submodule update --init --depth 1 third_party/pjproject third_party/libv90modem
+
+      - name: Configure
+        run: cmake -S . -B build-linux -DCMAKE_BUILD_TYPE=${{ matrix.configuration }}
+
+      - name: Build
+        run: cmake --build build-linux -j "$(nproc)"
+
+      - name: Run tests
+        run: ctest --test-dir build-linux --output-on-failure

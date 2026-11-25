@@ -13,3 +13,4 @@ out/
 
 voipmodem.ini
 Win32/
+build-linux/

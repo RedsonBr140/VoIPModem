@@ -1,7 +1,15 @@
 // The control API's building blocks: statistics, com0com pairing, the
 // TCP server (over a real loopback socket) and the loopback self-test.
+#ifdef _WIN32
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include <winsock2.h>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
+#endif
 
 #include "TestFramework.h"
 #include "../src/Lib/Control/ControlServer.h"
@@ -20,20 +28,30 @@ namespace {
 class TestClient {
 public:
     explicit TestClient(int port) {
+#ifdef _WIN32
         WSADATA wsa;
         WSAStartup(MAKEWORD(2, 2), &wsa);
+#endif
         s_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
-        addr.sin_port = htons(static_cast<u_short>(port));
+        addr.sin_port = htons(static_cast<unsigned short>(port));
         addr.sin_addr.s_addr = inet_addr("127.0.0.1");
         connected_ = connect(s_, reinterpret_cast<sockaddr*>(&addr), sizeof addr) == 0;
+#ifdef _WIN32
         DWORD timeout = 5000;
+#else
+        timeval timeout{5, 0};
+#endif
         setsockopt(s_, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof timeout);
     }
     ~TestClient() {
+#ifdef _WIN32
         closesocket(s_);
         WSACleanup();
+#else
+        close(s_);
+#endif
     }
     bool Connected() const { return connected_; }
 
@@ -51,7 +69,11 @@ public:
     }
 
 private:
+#ifdef _WIN32
     SOCKET s_;
+#else
+    int s_;
+#endif
     bool connected_ = false;
 };
 

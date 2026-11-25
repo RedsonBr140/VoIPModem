@@ -152,7 +152,12 @@ CallAudioBridge::CallAudioBridge(bool callingParty, TaggedLogger& logger, bool e
     linkStatus_.active = modem_ != nullptr;
 
     if (enableLocalAudio) {
+#ifdef _WIN32
         localSpeaker_.emplace();
+        localAudio_ = true;
+#else
+        logger_.Warn("EnableLocalAudio is ignored: the modem speaker is only available on Windows");
+#endif
     }
 }
 
@@ -191,7 +196,7 @@ void CallAudioBridge::Start(pj::AudioMedia& callAudio) {
                  " offering " + modulationsDescription_ +
                  (errorControl_ ? (compression_ ? " with V.42" : " with V.42, no compression")
                                 : " without error control") +
-                 (localSpeaker_.has_value() ? "; local audio monitor enabled" : ""));
+                 (localAudio_ ? "; local audio monitor enabled" : ""));
 }
 
 int CallAudioBridge::ModemGetBit() {
@@ -467,6 +472,7 @@ void CallAudioBridge::onFrameReceived(pj::MediaFrame& frame) {
 }
 
 void CallAudioBridge::PlayLocally(const std::vector<std::int16_t>& rx, const std::vector<std::int16_t>& tx) {
+#ifdef _WIN32
     if (!localSpeaker_.has_value() || !localSpeaker_->IsAvailable()) {
         return;
     }
@@ -474,6 +480,10 @@ void CallAudioBridge::PlayLocally(const std::vector<std::int16_t>& rx, const std
     for (size_t i = 0; i < rx.size(); ++i) mixed[i] += rx[i] / 32768.0f;
     for (size_t i = 0; i < tx.size(); ++i) mixed[i] += tx[i] / 32768.0f;
     localSpeaker_->Write(mixed);
+#else
+    (void)rx;
+    (void)tx;
+#endif
 }
 
 void CallAudioBridge::EnqueueTxByte(std::uint8_t byte) {

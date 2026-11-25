@@ -5,9 +5,33 @@ host platform after release 0.0.2 (see `PROJECT_SPEC.md` section 3,
 "Linux"). Windows remains the primary platform and keeps its Visual
 Studio build.
 
-**Status: planned. Nothing Linux-specific has been built yet.** Each item
-below says whether it is done, in progress or planned; "done" means it
-was built and run on Linux, not only written.
+**Status: the library and its unit tests build and pass on Linux; there
+is no Linux executable yet.** Each item below says whether it is done, in
+progress or planned; "done" means it was built and run on Linux, not only
+written.
+
+## Building
+
+Needs CMake 3.28 or later, a C and C++17 compiler and make. No other
+packages: PJSIP and libv90modem come from the submodules.
+
+```sh
+git submodule update --init third_party/pjproject third_party/libv90modem
+cmake -S . -B build-linux -DCMAKE_BUILD_TYPE=Release
+cmake --build build-linux -j"$(nproc)"
+ctest --test-dir build-linux --output-on-failure
+```
+
+- `CMakeLists.txt` is for Linux only and stops with an error on Windows,
+  where `VoIPModem.sln` is the build.
+- PJSIP is built with its own CMake build, with VoIPModem's
+  `third_party/pjsip-config/config_site.h` copied into its tree (as
+  `scripts/setup-pjproject.ps1` does on Windows). Only what VoIPModem
+  uses is built: SIP, RTP, G.711 and the null sound device. There is no
+  SSL, video, ALSA, or codec that needs a system library.
+- libv90modem is built by its own `Makefile`, into the build directory.
+- Targets: `voipmodem_lib` (static library) and `voipmodem_tests` (the
+  same unit tests as on Windows).
 
 ## Scope
 
@@ -72,7 +96,7 @@ To be designed and verified, not yet decided:
 
 | # | Increment | Status |
 |---|---|---|
-| 1 | CMake build of libv90modem, PJSIP and the VoIPModem library; the unit tests pass on Linux; an Ubuntu CI job | Planned |
+| 1 | CMake build of libv90modem, PJSIP and the VoIPModem library; the unit tests pass on Linux; an Ubuntu CI job | **Done** 2026-11-25: 160 tests pass on Debian 13 (Release and Debug) |
 | 2 | `PtySerialPort` (`ISerialPort` on a PTY) with the emulation above, and unit tests that open the slave side | Planned |
 | 3 | Linux entry point: foreground process, SIGTERM/SIGINT, systemd unit; Linux versions of the platform-specific parts of `SystemInfo` and `Application` | Planned |
 | 4 | Live test: AT commands through a terminal program on the symlink, SIP registration with Asterisk, a modem call to `CONNECT` | Planned |
@@ -88,10 +112,12 @@ From a survey of `src/App` and `src/Lib` (the Manager stays Windows-only):
 | `Lib/Serial/WindowsSerialPort` | Win32 COM API | New `PtySerialPort` (increment 2) |
 | `App/main.cpp` | Windows service, console Ctrl+C handler | Signal handling and systemd (increment 3) |
 | `Lib/Control/SystemInfo.cpp` | Registry: COM ports and modem drivers | List the lines' PTYs instead (increment 3) |
-| `Lib/Audio/WindowsAudioOutput` | waveOut | Left out on Linux (increment 1) |
-| `Lib/Sip/PjsipEndpoint.cpp` | `timeBeginPeriod` | Not needed on Linux (increment 1) |
-| `App/Application.cpp`, `Lib/Logging/Logger.cpp`, `Lib/Config/IniDocument.cpp` | A few `_WIN32` sections | Linux branches (increments 1 and 3) |
-| `Lib/Control/ControlServer.cpp` | Sockets | Already has a POSIX branch; untested on Linux |
+| `Lib/Audio/WindowsAudioOutput` | waveOut | Done: not built on Linux; `CallAudioBridge` logs that `EnableLocalAudio` is ignored |
+| `Lib/Sip/PjsipEndpoint.cpp` | `timeBeginPeriod` | Done: Windows only |
+| `Lib/Logging/Logger.cpp`, `Lib/Config/IniDocument.cpp` | A few `_WIN32` sections | Done: they already had POSIX branches, now built on Linux |
+| `App/Application.cpp` | A few `_WIN32` sections | Increment 3 |
+| `Lib/Control/ControlServer.cpp` | Sockets | Done: its POSIX branch passes the control API tests over loopback |
+| `tests/ControlTests.cpp` | Winsock test client | Done: POSIX branch |
 
 ## Test environment
 
