@@ -33,7 +33,8 @@ TEST(InvalidCommand_RespondsError) {
     TaggedLogger taggedLogger(logger, "Test");
     ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
 
-    const auto outcome = core.Execute(AtCommandParser::Parse("ATX1"));
+    // Y is still unsupported; this used ATX1 until X became a recognised command.
+    const auto outcome = core.Execute(AtCommandParser::Parse("ATY1"));
     EXPECT_TRUE(outcome.finalResult == ResultCode::Error);
 }
 
@@ -272,6 +273,100 @@ TEST(AtM_SetsSpeakerMode_ReturnsOk) {
     const auto outcome = core.Execute(AtCommandParser::Parse("ATM2"));
     EXPECT_TRUE(outcome.finalResult == ResultCode::OK);
     EXPECT_EQ(core.Profile().speakerMode, 2);
+}
+
+TEST(UnimodemInitString1_ReturnsOk) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.Execute(AtCommandParser::Parse("AT&FE0V1&C1&D2S95=47S0=0"));
+    EXPECT_TRUE(outcome.hasResult);
+    EXPECT_TRUE(outcome.finalResult == ResultCode::OK);
+    EXPECT_TRUE(!core.Profile().echoEnabled);
+    EXPECT_EQ(core.Profile().dcdMode, 1);
+    EXPECT_EQ(core.Profile().dtrMode, 2);
+}
+
+TEST(UnimodemInitString2_ReturnsOk) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.Execute(AtCommandParser::Parse("ATS7=60L0M1&K3N1X4"));
+    EXPECT_TRUE(outcome.hasResult);
+    EXPECT_TRUE(outcome.finalResult == ResultCode::OK);
+    EXPECT_EQ(core.Profile().flowControl, 3);
+    EXPECT_EQ(core.Profile().speedNegotiation, 1);
+    EXPECT_EQ(core.Profile().resultCodeSet, 4);
+}
+
+TEST(NewSettingCommands_StoreValues) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.Execute(AtCommandParser::Parse("AT&C0&D3&K6X2N0"));
+    EXPECT_TRUE(outcome.finalResult == ResultCode::OK);
+    EXPECT_EQ(core.Profile().dcdMode, 0);
+    EXPECT_EQ(core.Profile().dtrMode, 3);
+    EXPECT_EQ(core.Profile().flowControl, 6);
+    EXPECT_EQ(core.Profile().resultCodeSet, 2);
+    EXPECT_EQ(core.Profile().speedNegotiation, 0);
+}
+
+TEST(NewSettingCommands_WithoutDigit_StoreZero) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.Execute(AtCommandParser::Parse("AT&C&D&KXN"));
+    EXPECT_TRUE(outcome.finalResult == ResultCode::OK);
+    EXPECT_EQ(core.Profile().dcdMode, 0);
+    EXPECT_EQ(core.Profile().dtrMode, 0);
+    EXPECT_EQ(core.Profile().flowControl, 0);
+    EXPECT_EQ(core.Profile().resultCodeSet, 0);
+    EXPECT_EQ(core.Profile().speedNegotiation, 0);
+}
+
+TEST(NewSettingCommands_OutOfRange_ReturnErrorAndChangeNothing) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    const auto outcome = core.Execute(AtCommandParser::Parse("ATE0&K1"));
+    EXPECT_TRUE(outcome.finalResult == ResultCode::Error);
+    EXPECT_TRUE(core.Profile().echoEnabled); // E0 earlier on the line did not run
+    EXPECT_EQ(core.Profile().flowControl, 3);
+}
+
+TEST(FactoryDefaultsAndReset_RestoreNewSettings) {
+    FakeCallController controller;
+    Logger logger;
+    TaggedLogger taggedLogger(logger, "Test");
+    ModemStateMachine core(controller, taggedLogger, "VoIPModem Test Modem");
+
+    // Factory profile: &C1 &D2 &K3 X4 N1.
+    EXPECT_EQ(core.Profile().dcdMode, 1);
+    EXPECT_EQ(core.Profile().dtrMode, 2);
+    EXPECT_EQ(core.Profile().flowControl, 3);
+    EXPECT_EQ(core.Profile().resultCodeSet, 4);
+    EXPECT_EQ(core.Profile().speedNegotiation, 1);
+
+    for (const char* restore : {"AT&F", "ATZ"}) {
+        core.Execute(AtCommandParser::Parse("AT&C0&D0&K0X0N0"));
+        EXPECT_TRUE(core.Execute(AtCommandParser::Parse(restore)).finalResult == ResultCode::OK);
+        EXPECT_EQ(core.Profile().dcdMode, 1);
+        EXPECT_EQ(core.Profile().dtrMode, 2);
+        EXPECT_EQ(core.Profile().flowControl, 3);
+        EXPECT_EQ(core.Profile().resultCodeSet, 4);
+        EXPECT_EQ(core.Profile().speedNegotiation, 1);
+    }
 }
 
 TEST(FClassTest_ReportsDataOnlySupport) {

@@ -21,6 +21,11 @@ enum class AtCommandType {
     Answer,           // ATA
     HangUp,           // ATHn
     FactoryDefaults,  // AT&Fn
+    SetDcdMode,       // AT&Cn (0-1) -- stored only, not honored; see ModemProfile.h
+    SetDtrMode,       // AT&Dn (0-3) -- stored only, not honored; see ModemProfile.h
+    SetFlowControl,   // AT&Kn (0,3,4,5,6) -- stored only, not honored; see ModemProfile.h
+    SetResultCodeSet, // ATXn (0-4) -- stored only, not honored; see ModemProfile.h
+    SetSpeedNegotiation, // ATNn (0-1) -- stored only, not honored; see ModemProfile.h
     ExtendedCommand,  // AT+<name>[=?|?|=<value>] or AT#<name>[...] (V.25ter / vendor extensions)
     Unknown
 };
@@ -49,7 +54,7 @@ enum class AtDialMode {
 
 struct AtCommand {
     AtCommandType type = AtCommandType::Unknown;
-    std::optional<int> numericParam;  // E/V/Q/Z/H/&F parameter, or SetRegister value
+    std::optional<int> numericParam;  // E/V/Q/L/M/X/N/Z/H/&C/&D/&F/&K parameter, or SetRegister value
     std::optional<int> registerIndex; // S-register index for SetRegister/QueryRegister
     AtDialMode dialMode = AtDialMode::Default; // meaningful only for Dial
     std::string stringParam;          // dial string for Dial, with any T/P modifier removed
