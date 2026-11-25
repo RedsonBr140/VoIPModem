@@ -92,8 +92,10 @@ add_dependencies(libv90modem libv90modem_build)
 
 # --- VoIPModem library ---------------------------------------------------------
 #
-# src/Lib without the Windows-only parts (the COM port and the modem speaker).
+# src/Lib without the Windows-only parts (the COM port and the modem speaker),
+# plus the Linux PTY port.
 add_library(voipmodem_lib STATIC
+  src/Lib/Serial/PtySerialPort.cpp
   src/Lib/Config/AppConfig.cpp
   src/Lib/Config/IniConfig.cpp
   src/Lib/Config/IniDocument.cpp
@@ -131,6 +133,7 @@ add_executable(voipmodem_tests
   tests/IniDocumentTests.cpp
   tests/LibV90ModemTests.cpp
   tests/ModemStateMachineTests.cpp
+  tests/PtySerialPortTests.cpp # Linux only
 )
 target_link_libraries(voipmodem_tests PRIVATE voipmodem_lib)
 
