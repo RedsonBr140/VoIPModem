@@ -72,7 +72,7 @@ tests/                     VoIPModem.Tests (executable, hand-rolled framework in
 third_party/
   pjproject/               PJSIP 2.17, git submodule, built from source
   pjsip-config/            VoIPModem's config_site.h for pjproject
-  libv90modem/             libv90modem 0.6.0, git submodule (GPL-2.0-only)
+  libv90modem/             libv90modem 0.7.0, git submodule (GPL-2.0-only)
   libv90modem-build/       libv90modem.vcxproj: MSVC build of the submodule (Linux uses its Makefile)
   nlohmann/                JSON for Modern C++ 3.11.3, single header (MIT), for the control API
 build/
@@ -352,7 +352,7 @@ line's `CallAudioBridge` and nothing else.
 
 ## The modem (CallAudioBridge + libv90modem)
 
-[libv90modem](https://github.com/georgica/libv90modem) 0.6.0 (C99,
+[libv90modem](https://github.com/georgica/libv90modem) 0.7.0 (C99,
 fixed point, GPL-2.0-only) is the modem: V.8, V.21, V.22/V.22bis,
 V.32bis, V.34, V.90/V.92 (answering = digital/server side, calling =
 analogue/client side), Bell 103/212A, and V.42 (LAPM) with V.42bis/V.44

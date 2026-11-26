@@ -90,13 +90,13 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="$(UpstreamDir)api\v90modem.c" />
+    <ClCompile Include="$(UpstreamDir)api\v90modem.c;$(UpstreamDir)api\v90modem_diag.c" />
     <ClCompile Include="$(UpstreamDir)modem\*.c" />
     <ClCompile Include="$(UpstreamDir)v90\*.c" />
     <ClCompile Include="$(UpstreamDir)v34\*.c" />
     <ClCompile Include="$(UpstreamDir)v32\*.c" />
     <ClCompile Include="$(UpstreamDir)v92\*.c" />
-    <ClCompile Include="$(UpstreamDir)v42\v42_hdlc.c;$(UpstreamDir)v42\v42_detect.c;$(UpstreamDir)v42\v42_comp.c;$(UpstreamDir)v42\v44_comp.c;$(UpstreamDir)v42\v42_lapm.c;$(UpstreamDir)v42\v42.c" />
+    <ClCompile Include="$(UpstreamDir)v42\v42_hdlc.c;$(UpstreamDir)v42\v42_detect.c;$(UpstreamDir)v42\v42_comp.c;$(UpstreamDir)v42\v44_comp.c;$(UpstreamDir)v42\v42_lapm.c;$(UpstreamDir)v42\v42.c;$(UpstreamDir)v42\mnp_frame.c;$(UpstreamDir)v42\mnp.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

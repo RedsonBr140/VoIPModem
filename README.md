@@ -60,7 +60,8 @@ call at 56000/26400.*
 Early: version 0.0.2. Tested for real so far:
 
 - A US Robotics Courier 56K calling in through a Cisco SPA112 phone
-  adapter connected at V.34 (31200 bit/s), and Windows Server 2022 RRAS
+  adapter connected at V.34 (31200 bit/s), and, since libv90modem
+  0.6.1, at V.90 (49333/7200). Windows Server 2022 RRAS
   gave that Windows 11 caller internet access, with two workarounds (see
   `docs/WINDOWS_RAS_DIALIN.md`).
 - BinModem, a SIP software modem, connected at V.90 (56000/26400) when

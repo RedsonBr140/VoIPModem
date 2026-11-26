@@ -76,7 +76,7 @@ connection, not merely an answered telephone call.*
 ### Done
 
 - **Modem engine**: [libv90modem](https://github.com/georgica/libv90modem)
-  0.6.0 (GPL-2.0-only), integrated as a submodule with an MSVC project,
+  0.7.0 (GPL-2.0-only), integrated as a submodule with an MSVC project,
   per the spec's "implement or integrate a suitable modem DSP engine" and
   CLAUDE.md's preference for established libraries. It provides V.8,
   V.21 through V.34, V.90/V.92 and V.42/V.42bis/V.44. Two unit tests
@@ -139,8 +139,13 @@ analog leg. VoIPModem calling the physical modem has not been tried.
 
 - **Physical analog modem**: the acceptance test. Calling into a line,
   it connects at up to V.34 (above). Still open: V.90/V.92 start-up
-  through the gateway fails (cause not investigated), and VoIPModem
-  calling the physical modem has not been tried.
+  through the gateway failed until libv90modem 0.6.1, which fixed the
+  cause upstream found on a USR Courier behind an FXS gateway (the
+  caller's S after Jd was not taken on a tilted line with clock drift,
+  so Jd ran until start-up failed, every call). With 0.6.1 the Courier
+  connected at V.90, 49333/7200 with V.42 (2026-11-25); 0.7.0 carries
+  the same fix. Still open: VoIPModem calling the physical modem has
+  not been tried.
 - **V.92**: answering, calls settle at V.90. On one call (before the
   jitter-buffer fix) our side retrained with Tone B while BinModem was
   setting up its V.92 PCM upstream. Not yet known whether that was the
